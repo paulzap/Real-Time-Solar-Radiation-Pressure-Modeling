@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0"
+         xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="UserLocalPaths">
+    <!-- Версия CUDA: узнать через  nvcc -V
+         ВНИМАНИЕ: при смене версии также обновить строки "CUDA X.Y.props" / ".targets"
+         в SM2D.vcxproj вручную (VS не поддерживает макрос в этом import-пути). -->
+    <CudaVersion>12.4</CudaVersion>
+    <!-- Compute capability GPU: RTX 30xx=compute_86,sm_86 | 40xx=compute_89,sm_89 | 20xx=compute_75,sm_75 -->
+    <!-- Таблица: https://developer.nvidia.com/cuda-gpus -->
+    <GpuArch>compute_86,sm_86</GpuArch>
+    <!-- Архитектура для PTX (OptiX): compute_75 совместима с Turing/Ampere/Ada -->
+    <OptixPtxArch>compute_75</OptixPtxArch>
+    <!-- Папка OptiX SDK (содержит include/optix.h) -->
+    <!-- Найти: обычно C:\ProgramData\NVIDIA Corporation\OptiX SDK X.Y.Z -->
+    <OptixRoot>C:\ProgramData\NVIDIA Corporation\OptiX SDK 9.1.0</OptixRoot>
+    <!-- Корень vcpkg (содержит vcpkg.exe и installed\x64-windows\) -->
+    <!-- Найти через:  where vcpkg  или  echo %VCPKG_ROOT% -->
+    <VcpkgRoot>C:\Users\YOUR_USERNAME\vcpkg</VcpkgRoot>
+    <!-- Папка Python (содержит include\Python.h и libs\pythonXYZ.lib) -->
+    <!-- Найти через:  python -c "import sys; print(sys.prefix)" -->
+    <PythonRoot>C:\Users\YOUR_USERNAME\AppData\Local\Programs\Python\Python312</PythonRoot>
+    <!-- Имя .lib-файла Python: python312.lib, python313.lib, ... -->
+    <!-- Найти через:  dir "%PythonRoot%\libs\python*.lib" -->
+    <PythonLib>python312.lib</PythonLib>
+  </PropertyGroup>
+</Project>

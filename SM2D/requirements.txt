@@ -1,0 +1,11 @@
+# Python dependencies for SRPEngine::visualizeLastResult() / visualize3d.py
+# Install with:  pip install -r requirements.txt
+#
+# The C++ library does not require any of these — they are only needed when
+# you call engine.visualizeLastResult(...) (which renders the saved CSV via
+# Plotly in a browser, or via Matplotlib as a fallback).
+
+numpy>=1.24
+pandas>=2.0
+plotly>=5.18
+matplotlib>=3.8

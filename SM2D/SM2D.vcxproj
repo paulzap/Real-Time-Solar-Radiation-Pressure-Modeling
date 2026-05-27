@@ -1,0 +1,362 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{0452410b-c8ce-4708-857c-b31919098719}</ProjectGuid>
+    <RootNamespace>SM2D</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>SM3D</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <!-- Машинозависимые пути: скопируй LocalPaths.props.template -> LocalPaths.props и заполни -->
+  <Import Project="$(MSBuildThisFileDirectory)LocalPaths.props"
+          Condition="exists('$(MSBuildThisFileDirectory)LocalPaths.props')" />
+  <!-- Fallback-значения, если LocalPaths.props отсутствует -->
+  <PropertyGroup Label="LocalPathDefaults">
+    <CudaVersion  Condition="'$(CudaVersion)'==''">12.4</CudaVersion>
+    <GpuArch      Condition="'$(GpuArch)'==''">compute_86,sm_86</GpuArch>
+    <OptixPtxArch Condition="'$(OptixPtxArch)'==''">compute_75</OptixPtxArch>
+    <OptixRoot    Condition="'$(OptixRoot)'==''">C:\ProgramData\NVIDIA Corporation\OptiX SDK 9.1.0</OptixRoot>
+    <VcpkgRoot    Condition="'$(VcpkgRoot)'==''">C:\vcpkg</VcpkgRoot>
+    <PythonRoot   Condition="'$(PythonRoot)'==''">C:\Python312</PythonRoot>
+    <PythonLib    Condition="'$(PythonLib)'==''">python312.lib</PythonLib>
+  </PropertyGroup>
+  <ImportGroup Label="ExtensionSettings">
+    <!-- CUDA toolkit version: update the Import line below when upgrading CUDA.
+         Cannot use $(CudaVersion) here -- VS CUDA plugin requires a literal version string at load time.
+         setup.ps1 updates this line automatically. -->
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.4.props" />
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(OptixRoot)\include;</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(OptixRoot)\include;</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(OptixRoot)\include;</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);$(OptixRoot)\include;</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>$(CUDA_PATH)\lib\x64;$(CUDA_PATH)\include;$(OptixRoot)\include;$(VcpkgRoot)\installed\x64-windows\include;$(PythonRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(CUDA_PATH)\lib\x64;$(PythonRoot)\libs;$(VcpkgRoot)\installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5_D.lib</AdditionalDependencies>
+    </Link>
+    <CudaCompile>
+      <CodeGeneration>$(GpuArch);</CodeGeneration>
+      <Include>$(OptixRoot)\include;</Include>
+    </CudaCompile>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\debug\bin\hdf5_D.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>$(CUDA_PATH)\lib\x64;$(CUDA_PATH)\include;$(OptixRoot)\include;$(VcpkgRoot)\installed\x64-windows\include;$(PythonRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(CUDA_PATH)\lib\x64;$(PythonRoot)\libs;$(VcpkgRoot)\installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5.lib</AdditionalDependencies>
+    </Link>
+    <CudaCompile>
+      <CodeGeneration>$(GpuArch);</CodeGeneration>
+      <Include>$(OptixRoot)\include;</Include>
+    </CudaCompile>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\bin\hdf5.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>$(CUDA_PATH)\lib\x64;$(CUDA_PATH)\include;$(OptixRoot)\include;$(VcpkgRoot)\installed\x64-windows\include;$(PythonRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(CUDA_PATH)\lib\x64;$(PythonRoot)\libs;$(VcpkgRoot)\installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5_D.lib</AdditionalDependencies>
+    </Link>
+    <CudaCompile>
+      <CodeGeneration>$(GpuArch);</CodeGeneration>
+      <Include>$(OptixRoot)\include;</Include>
+    </CudaCompile>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\debug\bin\hdf5_D.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>$(CUDA_PATH)\lib\x64;$(CUDA_PATH)\include;$(OptixRoot)\include;$(VcpkgRoot)\installed\x64-windows\include;$(PythonRoot)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(CUDA_PATH)\lib\x64;$(PythonRoot)\libs;$(VcpkgRoot)\installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5.lib</AdditionalDependencies>
+    </Link>
+    <CudaCompile>
+      <CodeGeneration>$(GpuArch);</CodeGeneration>
+      <Include>$(OptixRoot)\include;</Include>
+    </CudaCompile>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\bin\hdf5.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="SM3D_hw_info.cpp" />
+    <ClCompile Include="SatelliteDataset.cpp" />
+    <ClCompile Include="ShadowAlgorithms.cpp" />
+    <ClCompile Include="ReflectionRayCasting.cpp" />
+    <ClCompile Include="PixelGridRayCasting.cpp" />
+    <ClCompile Include="SRPLibrary.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="gpu_optix_raytracer.h" />
+    <ClInclude Include="gpu_optix_shared_internal.h" />
+    <ClInclude Include="bench_methods.h" />
+    <ClInclude Include="SatelliteDataset.h" />
+    <ClInclude Include="ShadowAlgorithms.h" />
+    <ClInclude Include="SRPLibrary.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="gpu_optix_shared.cu">
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OptixRoot)\include;</Include>
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_center_raytracer.cu">
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OptixRoot)\include;</Include>
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_center_raytracer_bench.cu">
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OptixRoot)\include;</Include>
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_pixel_grid_raytracer.cu">
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OptixRoot)\include;</Include>
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_pixel_grid_raytracer_bench.cu">
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OptixRoot)\include;</Include>
+      <Include Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OptixRoot)\include;</Include>
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_reflection_raytracer.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_reflection_raytracer_bench.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_pixel_grid_raytracer.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_pixel_grid_raytracer_bench.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CustomBuild Include="optix_shaders_center.cu">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center.ptx"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling OptiX centroid shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling OptiX centroid shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling OptiX centroid shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling OptiX centroid shaders to PTX</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)optix_shaders_center.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)optix_shaders_center.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)optix_shaders_center.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)optix_shaders_center.ptx</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="optix_shaders_center_bench.cu">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center_bench.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center_bench.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center_bench.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_center_bench.ptx"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling OptiX centroid bench shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling OptiX centroid bench shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling OptiX centroid bench shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling OptiX centroid bench shaders to PTX</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)optix_shaders_center_bench.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)optix_shaders_center_bench.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)optix_shaders_center_bench.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)optix_shaders_center_bench.ptx</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="optix_shaders_pixel_grid.cu">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid.ptx"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling OptiX pixel-grid shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling OptiX pixel-grid shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling OptiX pixel-grid shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling OptiX pixel-grid shaders to PTX</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)optix_shaders_pixel_grid.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)optix_shaders_pixel_grid.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)optix_shaders_pixel_grid.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)optix_shaders_pixel_grid.ptx</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="optix_shaders_pixel_grid_bench.cu">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid_bench.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid_bench.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid_bench.ptx"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">set PATH=$(VCToolsInstallDir)bin\HostX64\x64;%PATH% &amp;&amp; nvcc -ptx -arch=$(OptixPtxArch) -I"$(OptixRoot)\include" "%(FullPath)" -o "$(ProjectDir)optix_shaders_pixel_grid_bench.ptx"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling OptiX pixel-grid bench shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling OptiX pixel-grid bench shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling OptiX pixel-grid bench shaders to PTX</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling OptiX pixel-grid bench shaders to PTX</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)optix_shaders_pixel_grid_bench.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)optix_shaders_pixel_grid_bench.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)optix_shaders_pixel_grid_bench.ptx</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)optix_shaders_pixel_grid_bench.ptx</Outputs>
+    </CustomBuild>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <!-- Keep version in sync with the .props import above. -->
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.4.targets" />
+  </ImportGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       Path validation — runs before build, gives actionable error messages
+       when LocalPaths.props contains wrong values or was not created yet.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <Target Name="ValidateLocalPaths" BeforeTargets="Build">
+
+    <!-- Remind user to create LocalPaths.props if missing (fallback defaults may be wrong) -->
+    <Warning Condition="!Exists('$(MSBuildThisFileDirectory)LocalPaths.props')"
+             Text="LocalPaths.props not found — using fallback defaults which may be wrong on this machine. Copy SM2D\LocalPaths.props.template to SM2D\LocalPaths.props and fill in your paths." />
+
+    <!-- OptiX SDK -->
+    <Error Condition="!Exists('$(OptixRoot)\include\optix.h')"
+           Text="OptiX SDK not found at: $(OptixRoot)\include\optix.h. Set OptixRoot in LocalPaths.props. Download: https://developer.nvidia.com/designworks/optix/download (requires free NVIDIA Developer account)." />
+
+    <!-- vcpkg + HDF5 -->
+    <Error Condition="!Exists('$(VcpkgRoot)\installed\x64-windows\include\hdf5.h')"
+           Text="HDF5 (vcpkg) not found at: $(VcpkgRoot)\installed\x64-windows\include\hdf5.h. Set VcpkgRoot in LocalPaths.props, then run: vcpkg install hdf5:x64-windows highfive:x64-windows pybind11:x64-windows" />
+
+    <!-- Python headers -->
+    <Error Condition="!Exists('$(PythonRoot)\include\Python.h')"
+           Text="Python headers not found at: $(PythonRoot)\include\Python.h. Set PythonRoot in LocalPaths.props. Find your Python: python -c &quot;import sys; print(sys.prefix)&quot;" />
+
+  </Target>
+</Project>

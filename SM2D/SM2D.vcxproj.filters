@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="CUDA / OptiX">
+      <UniqueIdentifier>{8C2F4D52-5C7E-4B8A-9F6E-3A1D2E4F5A6B}</UniqueIdentifier>
+      <Extensions>cu;ptx</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SM3D_hw_info.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SatelliteDataset.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ShadowAlgorithms.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ReflectionRayCasting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PixelGridRayCasting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SRPLibrary.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="SRPLibrary.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SatelliteDataset.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ShadowAlgorithms.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_optix_raytracer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_optix_shared_internal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bench_methods.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="gpu_optix_shared.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_center_raytracer.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_center_raytracer_bench.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_pixel_grid_raytracer.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_optix_pixel_grid_raytracer_bench.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_reflection_raytracer.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_reflection_raytracer_bench.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_pixel_grid_raytracer.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_pixel_grid_raytracer_bench.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="optix_shaders_center.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CustomBuild>
+    <CustomBuild Include="optix_shaders_center_bench.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CustomBuild>
+    <CustomBuild Include="optix_shaders_pixel_grid.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CustomBuild>
+    <CustomBuild Include="optix_shaders_pixel_grid_bench.cu">
+      <Filter>CUDA / OptiX</Filter>
+    </CustomBuild>
+  </ItemGroup>
+</Project>
