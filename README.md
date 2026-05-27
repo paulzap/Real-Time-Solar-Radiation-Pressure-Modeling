@@ -1,4 +1,4 @@
-# SM3D — Solar Radiation Pressure Library
+# Solar Radiation Pressure Library — GPU & RT-Cores
 
 [English](README.md) · [Русский](README.ru.md)
 
@@ -20,7 +20,7 @@ Solar radiation pressure is a non-conservative perturbation that, on
 high-area-to-mass spacecraft, dominates secular orbit evolution beyond the drag
 regime. Computing it correctly on a real CAD mesh requires self-shadowing,
 multi-bounce specular reflections, and per-facet optical properties
-(reflectance ρ, specularity μ, emissivity ε). This library does that, fast,
+(absorptance α, specularity μ, emissivity ε). This library does that, fast,
 through a one-header C++ interface.
 
 The same triangulation can be evaluated by **six algorithms × two paths**:
@@ -113,6 +113,18 @@ print_hardware_info();                        // table to stdout
 | NVIDIA GPU                    | SM ≥ 7.5  | Turing or newer (RTX 20xx / 30xx / 40xx / 50xx)               |
 | vcpkg packages                | latest    | `hdf5:x64-windows` `highfive:x64-windows` `pybind11:x64-windows` |
 | Python                        | **3.10+** | Only for `visualizeLastResult()`; auto-detected at runtime     |
+
+---
+
+## Dataset
+
+Test geometry (triangulated spacecraft meshes in HDF5 format) is published
+separately on Zenodo:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20261561.svg)](https://doi.org/10.5281/zenodo.20261561)
+
+Download and extract `.h5` files into `SM2D/data3d_hdf5_0.5/`
+(or pass any folder path to `SRPEngine`).
 
 ---
 
@@ -288,8 +300,31 @@ cd x64\Release
 
 ## License
 
-TBD — contact the authors.
+MIT License — see [LICENSE](LICENSE).
+
+---
 
 ## Contact
 
-Issues and questions: open an issue on the repository.
+**Author:** Zapevalin P.R.  
+**Email:** pav9981@yandex.ru  
+**Issues:** open an issue on this repository.
+
+---
+
+## Citation
+
+If you use this code in your research, please cite:
+
+> P.R. Zapevalin, "Comparative analysis of spacecraft self-shadowing algorithms",
+> *Advances in Space Research*, 2026. *(in press)*
+
+```bibtex
+@article{zapevalin2026srp,
+  title   = {Comparative analysis of spacecraft self-shadowing algorithms},
+  author  = {Zapevalin, P.R.},
+  journal = {Advances in Space Research},
+  year    = {2026},
+  note    = {in press}
+}
+```
