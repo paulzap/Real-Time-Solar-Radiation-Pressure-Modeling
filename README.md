@@ -218,83 +218,8 @@ setup.ps1                            # one-shot dependency setup script
 
 ## Troubleshooting
 
-### `error MSB4019: imported project "CUDA X.Y.props" not found`
-
-Your installed CUDA version does not match the version hardcoded in
-`SM2D.vcxproj`. The VS CUDA plugin requires a literal version string in the
-import path and does not support MSBuild macros there.
-
-**Fix:** Run `.\setup.ps1` — it patches `SM2D.vcxproj` automatically.
-Or edit `SM2D.vcxproj` manually: find `CUDA 12.4.props` / `CUDA 12.4.targets`
-and replace `12.4` with your installed version (e.g. `13.1`).
-
----
-
-### `fatal error C1083: highfive/highfive.hpp: No such file or directory`
-### `fatal error C1083: pybind11/embed.h: No such file or directory`
-
-The vcpkg packages `highfive` and/or `pybind11` are not installed.
-
-**Fix:**
-```powershell
-vcpkg install highfive:x64-windows pybind11:x64-windows
-```
-Or re-run `.\setup.ps1` — it checks all three required packages and installs
-missing ones with your confirmation.
-
----
-
-### `CUDA error: too many resources requested for launch (error 701)`
-
-You are building or running the **Debug** configuration. Debug CUDA kernels
-use significantly more registers per thread and exceed SM resource limits.
-
-**Fix:** Switch to **Release | x64** in Visual Studio and rebuild.
-
----
-
-### `Failed to import encodings module` / `Visualisation skipped`
-
-The embedded Python interpreter cannot find the standard library. This happens
-when `PYTHONHOME` is not set or points to the wrong Python installation.
-
-**Fix:** Run `.\setup.ps1` — it locates Python and sets `PYTHONHOME` in your
-user environment. Then **restart Visual Studio** (it inherits the environment
-at launch time). Alternatively, set `PYTHONHOME` manually:
-```powershell
-[System.Environment]::SetEnvironmentVariable("PYTHONHOME",
-    "C:\Users\<you>\AppData\Local\Programs\Python\Python312", "User")
-```
-
----
-
-### `CUDA error: PTX JIT compilation failed` / blank OptiX output
-
-The `.ptx` shader files are missing from the executable directory.
-Pre-build events compile them automatically; they may have been skipped if
-the build was not a full Rebuild.
-
-**Fix:** **Build → Rebuild Solution** (not just Build). Confirm the four
-`.ptx` files appear alongside `SM3D.exe`:
-```
-optix_shaders_center.ptx
-optix_shaders_center_bench.ptx
-optix_shaders_pixel_grid.ptx
-optix_shaders_pixel_grid_bench.ptx
-```
-
----
-
-### `No HDF5 files found in <path>`
-
-The path passed to `SRPEngine(folder)` does not contain `.h5` / `.hdf5` files,
-or the working directory is wrong.
-
-**Fix:** Run from `x64\Release\` and pass a relative path:
-```powershell
-cd x64\Release
-.\SM3D.exe ..\..\data3d_hdf5_0.5
-```
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for a full list of known issues
+(CUDA version mismatch, missing vcpkg packages, Debug vs Release, PYTHONHOME, PTX).
 
 ---
 
@@ -314,17 +239,5 @@ MIT License — see [LICENSE](LICENSE).
 
 ## Citation
 
-If you use this code in your research, please cite:
-
-> P.R. Zapevalin, "Comparative analysis of spacecraft self-shadowing algorithms",
-> *Advances in Space Research*, 2026. *(in press)*
-
-```bibtex
-@article{zapevalin2026srp,
-  title   = {Comparative analysis of spacecraft self-shadowing algorithms},
-  author  = {Zapevalin, P.R.},
-  journal = {Advances in Space Research},
-  year    = {2026},
-  note    = {in press}
-}
-```
+If you use this code in your research, please cite the accompanying paper.
+Citation details will be added upon publication.
