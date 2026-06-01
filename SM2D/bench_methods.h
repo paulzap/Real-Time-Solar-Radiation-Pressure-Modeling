@@ -11,6 +11,7 @@
 #include "SatelliteDataset.h"
 #include "ShadowAlgorithms.h"
 
+#ifdef SM3D_HAS_CUDA
 // GPU Shadow+Reflections (bench): no bounce arrays; max_reflections==0
 // costs the same as the plain GPU shadow method.
 SRPResult calculate_labels_reflections_gpu_bench(
@@ -26,7 +27,9 @@ SRPResult calculate_labels_pixel_grid_gpu_bench(
     double grid_step,
     int max_reflections,
     bool verbose = false);
+#endif // SM3D_HAS_CUDA
 
+#ifdef SM3D_HAS_OPTIX
 // RTX Shadow (bench): no bounce arrays zeroed/downloaded, lean PTX.
 SRPResult calculate_labels_ray_casting_rtx_bench(
     const std::vector<Triangle>& triangles,
@@ -40,3 +43,4 @@ SRPResult calculate_labels_pixel_grid_rtx_bench(
     double grid_step,
     int max_reflections,
     bool verbose = false);
+#endif // SM3D_HAS_OPTIX

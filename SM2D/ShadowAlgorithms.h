@@ -53,19 +53,23 @@ SRPResult calculate_labels_ray_casting_reflections(
     bool verbose = true,
     const std::string& primary_emitter_name = "");
 
+#ifdef SM3D_HAS_CUDA
 SRPResult calculate_labels_ray_casting_reflections_gpu(
     const std::vector<Triangle>& triangles,
     const std::vector<double>& sun_vector,
     int max_reflections,
     bool verbose = true,
     const std::string& primary_emitter_name = "");
+#endif
 
+#ifdef SM3D_HAS_OPTIX
 // RTX (OptiX hardware) centroid ray casting + multi-bounce reflections.
 SRPResult calculate_labels_ray_casting_rtx(
     const std::vector<Triangle>& triangles,
     const std::vector<double>& sun_vector,
     int max_reflections = 0,
     const std::string& primary_emitter_name = "");
+#endif
 
 
 // ---------------------------------------------------------------------------
@@ -81,6 +85,7 @@ SRPResult calculate_labels_pixel_grid(
     bool verbose = true,
     const std::string& primary_emitter_name = "");
 
+#ifdef SM3D_HAS_CUDA
 SRPResult calculate_labels_pixel_grid_gpu(
     const std::vector<Triangle>& triangles,
     const std::vector<double>& sun_vector,
@@ -88,7 +93,9 @@ SRPResult calculate_labels_pixel_grid_gpu(
     int max_reflections = 0,
     bool verbose = true,
     const std::string& primary_emitter_name = "");
+#endif
 
+#ifdef SM3D_HAS_OPTIX
 SRPResult calculate_labels_pixel_grid_rtx(
     const std::vector<Triangle>& triangles,
     const std::vector<double>& sun_vector,
@@ -96,6 +103,7 @@ SRPResult calculate_labels_pixel_grid_rtx(
     int max_reflections = 0,
     bool verbose = true,
     const std::string& primary_emitter_name = "");
+#endif
 
 
 // ---------------------------------------------------------------------------

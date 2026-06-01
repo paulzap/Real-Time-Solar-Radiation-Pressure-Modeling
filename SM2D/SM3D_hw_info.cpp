@@ -5,17 +5,26 @@
 //
 // NOTE: optix_function_table_definition.h is NOT included here;
 // the function table is defined in gpu_optix_shared.cu.
+//
+// Conditional compilation:
+//   SM3D_HAS_CUDA   — full CUDA device query + NVML info
+//   SM3D_HAS_OPTIX  — OptiX runtime availability check
+//   neither         — CPU-only stubs (no CUDA symbols linked)
 // ============================================================
 
-#include "gpu_optix_raytracer.h"
-#include <cuda_runtime.h>
 #include <iostream>
 #include <iomanip>
 #include <string>
 #include <sstream>
 
+#ifdef SM3D_HAS_CUDA
+#  include <cuda_runtime.h>
+#  ifdef SM3D_HAS_OPTIX
+#    include "gpu_optix_raytracer.h"
+#  endif
+
 // ---------------------------------------------------------------------------
-// helpers
+// private helpers (CUDA build only)
 // ---------------------------------------------------------------------------
 static std::string fmt_ver(int v)
 {
@@ -50,7 +59,7 @@ static int cuda_cores_per_sm(int sm)
 }
 
 // ---------------------------------------------------------------------------
-// print_hardware_info
+// print_hardware_info  (CUDA build)
 // ---------------------------------------------------------------------------
 void print_hardware_info()
 {
@@ -72,9 +81,13 @@ void print_hardware_info()
     std::cout << "  CUDA Driver  : " << fmt_ver(driver_ver)  << "\n";
 
     // ── OptiX runtime init ───────────────────────────────────────────────────
+#ifdef SM3D_HAS_OPTIX
     // Delegated to gpu_optix_shared.cu (a .cu unit) which can call optixInit().
     bool optix_ok = is_optix_runtime_available();
     std::cout << "  OptiX init   : " << (optix_ok ? "OK" : "FAILED") << "\n";
+#else
+    std::cout << "  OptiX init   : not available (built without OptiX)\n";
+#endif
 
     // ── GPU devices ─────────────────────────────────────────────────────────
     int dev_count = 0;
@@ -184,14 +197,15 @@ void print_hardware_info()
 
     // ── Summary ─────────────────────────────────────────────────────────────
     std::cout << "\n  Build targets compiled into this binary:\n";
-    std::cout << "    SM 5.2 (Maxwell)   - broad compatibility, CAS double atomicAdd\n";
+    std::cout << "    SM 7.5 (Turing)    - RT Cores, native fp64 atomicAdd\n";
     std::cout << "    SM 8.6 (Ampere)    - native double atomicAdd, full RTX/OptiX\n";
+    std::cout << "    SM 8.9 (Ada)       - Ada Lovelace optimisations\n";
     std::cout << "  The SM of the active device is used at runtime; older paths are\n";
     std::cout << "  never executed on this hardware.\n\n";
 }
 
 // ---------------------------------------------------------------------------
-// Availability helpers - used by main_calculation()
+// Availability helpers (CUDA build)
 // ---------------------------------------------------------------------------
 
 bool is_cuda_device_available()
@@ -204,8 +218,12 @@ bool is_cuda_device_available()
 // reason explaining why it is not available.
 std::string rtx_unavailable_reason()
 {
+#ifdef SM3D_HAS_OPTIX
     if (!is_optix_runtime_available())
         return "OptiX runtime not loaded (nvoptix.dll missing or incompatible driver)";
+#else
+    return "built without OptiX support (SM3D_HAS_OPTIX not set)";
+#endif
 
     int count = 0;
     if (cudaGetDeviceCount(&count) != cudaSuccess || count == 0)
@@ -229,3 +247,36 @@ bool is_rtx_device_available()
 {
     return rtx_unavailable_reason().empty();
 }
+
+#else // !SM3D_HAS_CUDA — CPU-only stubs
+// ---------------------------------------------------------------------------
+// CPU-only stubs: no CUDA symbols linked, no GPU queries
+// ---------------------------------------------------------------------------
+
+void print_hardware_info()
+{
+    std::cout << "\n========================================================\n";
+    std::cout <<   "              Hardware & Driver Information           \n";
+    std::cout <<   "========================================================\n\n";
+    std::cout << "  This build was compiled without CUDA support.\n";
+    std::cout << "  Available methods: CentroidCPU, PixelGridCPU only.\n";
+    std::cout << "  Rebuild with SM3D_ENABLE_CUDA=ON (and CUDA toolkit installed)\n";
+    std::cout << "  to enable GPU acceleration.\n\n";
+}
+
+bool is_cuda_device_available()
+{
+    return false;
+}
+
+std::string rtx_unavailable_reason()
+{
+    return "built without CUDA/OptiX support";
+}
+
+bool is_rtx_device_available()
+{
+    return false;
+}
+
+#endif // SM3D_HAS_CUDA

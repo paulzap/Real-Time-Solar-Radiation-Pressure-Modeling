@@ -1,16 +1,19 @@
 #include "SRPLibrary.h"
 #include "SatelliteDataset.h"
 #include "ShadowAlgorithms.h"
-#include "gpu_optix_raytracer.h"
+#ifdef SM3D_HAS_OPTIX
+#  include "gpu_optix_raytracer.h"
+#endif
 #include "bench_methods.h"
 #include <stdexcept>
 #include <cmath>
 #include <iostream>
 #include <cstdlib>
 #include <filesystem>
-#include <pybind11/embed.h>
-
-namespace py = pybind11;
+#ifdef SM3D_HAS_PYTHON
+#  include <pybind11/embed.h>
+   namespace py = pybind11;
+#endif
 
 // -----------------------------------------------------------------------------
 // Private implementation (PImpl)
@@ -55,24 +58,40 @@ struct SRPEngine::Impl {
                 triangles, sun_vec, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::CentroidGPU:
+#ifdef SM3D_HAS_CUDA
             last_result = calculate_labels_reflections_gpu_bench(
                 triangles, sun_vec, max_reflections, /*verbose=*/false);
+#else
+            throw std::runtime_error("CentroidGPU requires CUDA. Use CentroidCPU or rebuild with CUDA support.");
+#endif
             break;
         case SRPMethod::CentroidRTX:
+#ifdef SM3D_HAS_OPTIX
             last_result = calculate_labels_ray_casting_rtx_bench(
                 triangles, sun_vec, max_reflections);
+#else
+            throw std::runtime_error("CentroidRTX requires OptiX. Use CentroidCPU/CentroidGPU or rebuild with OptiX support.");
+#endif
             break;
         case SRPMethod::PixelGridCPU:
             last_result = calculate_labels_pixel_grid(
                 triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::PixelGridGPU:
+#ifdef SM3D_HAS_CUDA
             last_result = calculate_labels_pixel_grid_gpu_bench(
                 triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+#else
+            throw std::runtime_error("PixelGridGPU requires CUDA. Use PixelGridCPU or rebuild with CUDA support.");
+#endif
             break;
         case SRPMethod::PixelGridRTX:
+#ifdef SM3D_HAS_OPTIX
             last_result = calculate_labels_pixel_grid_rtx_bench(
                 triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+#else
+            throw std::runtime_error("PixelGridRTX requires OptiX. Use PixelGridCPU/PixelGridGPU or rebuild with OptiX support.");
+#endif
             break;
         default:
             throw std::runtime_error("Unknown SRP method");
@@ -92,24 +111,40 @@ struct SRPEngine::Impl {
                 triangles, sun_vec, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::CentroidGPU:
+#ifdef SM3D_HAS_CUDA
             last_result = calculate_labels_ray_casting_reflections_gpu(
                 triangles, sun_vec, max_reflections, /*verbose=*/false);
+#else
+            throw std::runtime_error("CentroidGPU requires CUDA. Use CentroidCPU or rebuild with CUDA support.");
+#endif
             break;
         case SRPMethod::CentroidRTX:
+#ifdef SM3D_HAS_OPTIX
             last_result = calculate_labels_ray_casting_rtx(
                 triangles, sun_vec, max_reflections);
+#else
+            throw std::runtime_error("CentroidRTX requires OptiX. Use CentroidCPU/CentroidGPU or rebuild with OptiX support.");
+#endif
             break;
         case SRPMethod::PixelGridCPU:
             last_result = calculate_labels_pixel_grid(
                 triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::PixelGridGPU:
+#ifdef SM3D_HAS_CUDA
             last_result = calculate_labels_pixel_grid_gpu(
                 triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+#else
+            throw std::runtime_error("PixelGridGPU requires CUDA. Use PixelGridCPU or rebuild with CUDA support.");
+#endif
             break;
         case SRPMethod::PixelGridRTX:
+#ifdef SM3D_HAS_OPTIX
             last_result = calculate_labels_pixel_grid_rtx(
                 triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+#else
+            throw std::runtime_error("PixelGridRTX requires OptiX. Use PixelGridCPU/PixelGridGPU or rebuild with OptiX support.");
+#endif
             break;
         default:
             throw std::runtime_error("Unknown SRP method");
@@ -124,8 +159,8 @@ struct SRPEngine::Impl {
             std::cerr << "No result to visualize. Run compute() first.\n";
             return;
         }
+#ifdef SM3D_HAS_PYTHON
         const std::string tmp_csv = "tmp_srp_result.csv";
-
         // pybind11 requires a live Python interpreter before any py::module_::import().
         // The embedded interpreter does NOT inherit sys.path from the system
         // Python - without explicit Lib / site-packages entries it cannot find
@@ -266,6 +301,11 @@ struct SRPEngine::Impl {
         }
         visualize_triangles("results_3d/" + tmp_csv, every, show_normals,
             last_result.total_force, last_result.total_moment);
+#else
+        (void)every; (void)show_normals;
+        std::cerr << "visualizeLastResult() is not available: library was built without Python support.\n"
+                     "    Rebuild with SM3D_ENABLE_PYTHON=ON and pybind11 installed.\n";
+#endif // SM3D_HAS_PYTHON
     }
 };
 
