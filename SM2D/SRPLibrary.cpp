@@ -172,21 +172,24 @@ struct SRPEngine::Impl {
         // PYTHONHOME must be set before Py_Initialize() (before scoped_interpreter) to
         // suppress "Could not find platform independent libraries <prefix>".
         if (!Py_IsInitialized()) {
+            // ── Resolve PYTHONHOME ──────────────────────────────────────────────
+            // PYTHONHOME env var always takes precedence (set in system env or in VS
+            // Project → Properties → Debugging → Environment → PYTHONHOME=...).
+            // If absent we auto-detect the Python installation.
+            // Must be set BEFORE Py_Initialize / scoped_interpreter to prevent
+            // "Could not find platform independent libraries <prefix>" warnings.
+
+#ifdef _WIN32
             char*  python_home_buf = nullptr;
             size_t python_home_len = 0;
             _dupenv_s(&python_home_buf, &python_home_len, "PYTHONHOME");
+            const bool had_pythonhome = (python_home_buf != nullptr && python_home_len > 0);
+            std::string python_root = had_pythonhome ? std::string(python_home_buf) : "";
+            free(python_home_buf);
 
-            // Portable fallback: PYTHONHOME > %LOCALAPPDATA%\Programs\Python\Python312 > C:\Python312
-            // On a new machine: set PYTHONHOME in system environment or in VS:
-            //   Project → Properties → Debugging → Environment → PYTHONHOME=C:\...\Python3XX
-            std::string python_root;
-            if (python_home_buf && python_home_len > 0) {
-                python_root = std::string(python_home_buf);
-            } else {
-                // Auto-detect Python: scan %LOCALAPPDATA%\Programs\Python\Python3XX
-                // and pick the highest version that has include\Python.h.
-                // Fallback chain: scan > C:\Python3XX > C:\Python312
-                python_root = "";
+            if (!had_pythonhome) {
+                // Auto-detect: scan %LOCALAPPDATA%\Programs\Python\PythonXXX,
+                // pick the highest version that has include\Python.h.
                 char*  localappdata_buf = nullptr;
                 size_t localappdata_len = 0;
                 _dupenv_s(&localappdata_buf, &localappdata_len, "LOCALAPPDATA");
@@ -197,7 +200,6 @@ struct SRPEngine::Impl {
                             if (!entry.is_directory()) continue;
                             std::string candidate = entry.path().string();
                             if (std::filesystem::exists(candidate + "\\include\\Python.h")) {
-                                // Pick highest version (lexicographic order works: Python310 < Python312 < Python313)
                                 if (python_root.empty() || candidate > python_root)
                                     python_root = candidate;
                             }
@@ -205,7 +207,7 @@ struct SRPEngine::Impl {
                     } catch (...) {}
                 }
                 free(localappdata_buf);
-                // Fallback: try common system-wide paths
+                // Fallback: common system-wide Windows paths
                 if (python_root.empty()) {
                     for (const char* p : {"C:\\Python313","C:\\Python312","C:\\Python311","C:\\Python310"}) {
                         if (std::filesystem::exists(std::string(p) + "\\include\\Python.h")) {
@@ -213,28 +215,80 @@ struct SRPEngine::Impl {
                         }
                     }
                 }
-                if (python_root.empty())
-                    python_root = "C:\\Python312";  // last resort
-            }
-            const bool had_pythonhome = (python_home_buf != nullptr);
-            free(python_home_buf);
-
-            if (!had_pythonhome) {
+                if (python_root.empty()) python_root = "C:\\Python312"; // last resort
                 _putenv_s("PYTHONHOME", python_root.c_str());
             }
+#else // Linux / macOS
+            const char* phenv = std::getenv("PYTHONHOME");
+            const bool had_pythonhome = (phenv != nullptr);
+            std::string python_root = had_pythonhome ? std::string(phenv) : "";
+
+            if (!had_pythonhome) {
+                // Auto-detect: try common prefix directories, pick first that has Python.h.
+                // Covers system Python (/usr), Homebrew (/opt/homebrew, /usr/local),
+                // Conda (/opt/conda, ~/miniconda3, ~/anaconda3).
+                std::string home;
+                if (const char* h = std::getenv("HOME")) home = h;
+                const std::vector<std::string> candidates = {
+                    "/usr", "/usr/local", "/opt/homebrew", "/opt/conda",
+                    home + "/miniconda3", home + "/anaconda3",
+                    home + "/.local",
+                };
+                for (const auto& prefix : candidates) {
+                    // Python header may be python3.X or python3
+                    bool found = false;
+                    try {
+                        for (const auto& entry : std::filesystem::directory_iterator(prefix + "/include")) {
+                            if (!entry.is_directory()) continue;
+                            std::string name = entry.path().filename().string();
+                            if (name.rfind("python3", 0) == 0 &&
+                                std::filesystem::exists(entry.path() / "Python.h")) {
+                                python_root = prefix;
+                                found = true;
+                                break;
+                            }
+                        }
+                    } catch (...) {}
+                    if (found) break;
+                }
+                if (!python_root.empty())
+                    setenv("PYTHONHOME", python_root.c_str(), /*overwrite=*/1);
+            }
+#endif // _WIN32
             static py::scoped_interpreter guard{};
 
+            // ── Extend sys.path so stdlib / site-packages are importable ───────
             py::module_ sys = py::module_::import("sys");
             py::list path = sys.attr("path");
-            // Build sys.path entries dynamically from python_root so they follow
-            // whatever Python installation is configured via PYTHONHOME.
-            const std::string lib_paths[] = {
-                python_root + "\\Lib",
-                python_root + "\\Lib\\site-packages",
-                python_root + "\\DLLs",
-                ".",          // working directory - visualize3d.py lives next to the .exe
-            };
-            for (const auto& p : lib_paths) path.attr("append")(p.c_str());
+            path.attr("append")(".");   // always add working dir (visualize3d.py lives here)
+
+#ifdef _WIN32
+            // Windows Python layout: <root>\Lib, <root>\Lib\site-packages, <root>\DLLs
+            if (!python_root.empty()) {
+                for (const auto& p : {
+                    python_root + "\\Lib",
+                    python_root + "\\Lib\\site-packages",
+                    python_root + "\\DLLs",
+                }) path.attr("append")(p.c_str());
+            }
+#else
+            // Linux/macOS: derive versioned lib dirs from sys.prefix + sys.version_info.
+            // This is more reliable than hardcoding version numbers.
+            if (!python_root.empty()) {
+                try {
+                    py::object vi = sys.attr("version_info");
+                    int maj = vi.attr("major").cast<int>();
+                    int min = vi.attr("minor").cast<int>();
+                    std::string ver = std::to_string(maj) + "." + std::to_string(min);
+                    for (const auto& p : {
+                        python_root + "/lib/python" + ver,
+                        python_root + "/lib/python" + ver + "/site-packages",
+                        python_root + "/lib/python" + ver + "/dist-packages",
+                        python_root + "/lib/python" + ver + "/lib-dynload",
+                    }) path.attr("append")(p.c_str());
+                } catch (...) {}
+            }
+#endif
 
             // ── Auto-install missing visualization packages ───────────────────
             // Required by visualize3d.py: numpy, pandas, plotly, matplotlib.

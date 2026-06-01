@@ -39,10 +39,16 @@ endif()
 if(SM3D_HAS_CUDA AND SM3D_ENABLE_OPTIX)
     find_path(OPTIX_INCLUDE_DIR optix.h
         PATHS
+            # env var override (cross-platform): set OPTIX_INSTALL_DIR=/path/to/optix
             "$ENV{OPTIX_INSTALL_DIR}/include"
+            # Windows default install paths
             "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.1.0/include"
             "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.0.0/include"
             "C:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/include"
+            # Linux default install paths
+            "/opt/optix/include"
+            "/usr/local/optix/include"
+            "$ENV{HOME}/optix/include"
     )
     if(OPTIX_INCLUDE_DIR)
         set(SM3D_HAS_OPTIX TRUE)
