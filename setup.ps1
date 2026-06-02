@@ -1,31 +1,44 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    SM3D GPU SRP - auto-configure SM2D\LocalPaths.props
+    SM3D SRP Library — environment setup
 
 .DESCRIPTION
-    Scans standard installation paths for CUDA, OptiX SDK, vcpkg+HDF5, Python.
-    If everything is found - generates SM2D\LocalPaths.props.
-    If something is missing - prints instructions on what to install.
-    Missing Python packages (numpy, pandas, plotly, matplotlib) are installed automatically.
+    VS mode (default):
+        Scans for CUDA, OptiX, vcpkg, Python.
+        Generates SM2D\LocalPaths.props for Visual Studio.
+        All dependencies are required.
+
+    Library mode  (-Mode Library):
+        Same scan, then runs CMake and builds srp.lib into dist\.
+        CUDA / OptiX / Python are OPTIONAL — missing tools reduce
+        available methods but do not stop the build.
+        Only HDF5 + HighFive (via vcpkg) are required.
 
 .EXAMPLE
-    .\setup.ps1
-    .\setup.ps1 -VcpkgRoot C:\tools\vcpkg -OptixRoot "C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0"
+    .\setup.ps1                   # VS mode: check + write LocalPaths.props
+    .\setup.ps1 -Mode Library     # Library mode: check + build dist\srp.lib
+    .\setup.ps1 -Mode Library -Force  # rebuild even if dist\ already exists
+
+.PARAMETER Mode
+    "VS" (default) or "Library"
 
 .PARAMETER VcpkgRoot
-    Override vcpkg path (if not found automatically).
+    Override vcpkg path.
 
 .PARAMETER OptixRoot
     Override OptiX SDK path.
 
 .PARAMETER PythonRoot
-    Override Python installation path.
+    Override Python path.
 
 .PARAMETER Force
-    Overwrite LocalPaths.props even if it already exists.
+    VS: overwrite LocalPaths.props without prompting.
+    Library: delete and recreate build_dist\ and dist\.
 #>
 param(
+    [ValidateSet("VS","Library")]
+    [string]$Mode       = "VS",
     [string]$VcpkgRoot  = "",
     [string]$OptixRoot  = "",
     [string]$PythonRoot = "",
@@ -41,12 +54,13 @@ function Write-Err  { param($msg) Write-Host "  [ERR] $msg" -ForegroundColor Red
 function Write-Info { param($msg) Write-Host "        $msg" -ForegroundColor Cyan   }
 function Write-Step { param($msg) Write-Host "`n==> $msg"   -ForegroundColor White  }
 
-$ScriptDir = $PSScriptRoot
-$PropsFile = Join-Path $ScriptDir "SM2D\LocalPaths.props"
+$ScriptDir  = $PSScriptRoot
+$PropsFile  = Join-Path $ScriptDir "SM2D\LocalPaths.props"
+$ModeLabel  = if ($Mode -eq "Library") { "Library build" } else { "VS setup" }
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor White
-Write-Host "  SM3D GPU SRP  --  environment setup" -ForegroundColor White
+Write-Host "  SM3D SRP Library  --  $ModeLabel" -ForegroundColor White
 Write-Host "================================================================" -ForegroundColor White
 
 # -------------------------------------------------------------------------
@@ -84,17 +98,16 @@ if ($cudaPath) {
         $nvccOut = & "$cudaPath\bin\nvcc.exe" --version 2>&1 | Out-String
         if ($nvccOut -match 'release (\d+\.\d+)') { $cudaVersion = $Matches[1] }
     } catch {}
-    if (-not $cudaVersion -and $cudaPath -match 'v(\d+\.\d+)') {
-        $cudaVersion = $Matches[1]
-    }
+    if (-not $cudaVersion -and $cudaPath -match 'v(\d+\.\d+)') { $cudaVersion = $Matches[1] }
     Write-OK "CUDA $cudaVersion  ->  $cudaPath"
 } else {
-    Write-Err "CUDA Toolkit not found."
+    if ($Mode -eq "VS") { Write-Err  "CUDA Toolkit not found." }
+    else                { Write-Warn "CUDA Toolkit not found — GPU/RTX methods will be disabled." }
     Write-Info "Install from: https://developer.nvidia.com/cuda-downloads"
 }
 
 # -------------------------------------------------------------------------
-# 2. GPU compute capability (via nvidia-smi)
+# 2. GPU compute capability
 # -------------------------------------------------------------------------
 Write-Step "Detecting GPU architecture"
 
@@ -102,11 +115,8 @@ $gpuArch      = "compute_86,sm_86"
 $optixPtxArch = "compute_75"
 
 $smiPath = ""
-$smiCandidates = @(
-    "C:\Windows\System32\nvidia-smi.exe",
-    "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
-)
-foreach ($p in $smiCandidates) {
+foreach ($p in @("C:\Windows\System32\nvidia-smi.exe",
+                 "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe")) {
     if (Test-Path $p) { $smiPath = $p; break }
 }
 if (-not $smiPath) {
@@ -121,18 +131,16 @@ if ($smiPath) {
         if ($capStr -match '^(\d+)\.(\d+)$') {
             $maj = $Matches[1]; $min = $Matches[2]
             $gpuArch = "compute_$($maj)$($min),sm_$($maj)$($min)"
-            $cc = [int]"$($maj)$($min)"
-            if ($cc -ge 75) { $optixPtxArch = "compute_$($maj)$($min)" }
+            if ([int]"$($maj)$($min)" -ge 75) { $optixPtxArch = "compute_$($maj)$($min)" }
         }
         $gpuName = (& $smiPath --query-gpu=name --format=csv,noheader 2>&1 |
                     Select-Object -First 1).Trim()
-        Write-OK "$gpuName  ->  $gpuArch  (PTX: $optixPtxArch)"
+        Write-OK "$gpuName  ->  $gpuArch"
     } catch {
-        Write-Warn "nvidia-smi found but could not read compute capability. Using default: $gpuArch"
+        Write-Warn "nvidia-smi found but could not read compute capability. Default: $gpuArch"
     }
 } else {
-    Write-Warn "nvidia-smi not found. Using default: $gpuArch"
-    Write-Info "Make sure the NVIDIA driver is installed."
+    Write-Warn "nvidia-smi not found. Default: $gpuArch"
 }
 
 # -------------------------------------------------------------------------
@@ -158,33 +166,24 @@ if ($foundOptixRoot -and (Test-Path "$foundOptixRoot\include\optix.h")) {
     Write-OK "$(Split-Path $foundOptixRoot -Leaf)  ->  $foundOptixRoot"
 } else {
     $foundOptixRoot = ""
-    Write-Err "OptiX SDK not found (expected optix.h inside SDK\include\)."
-    Write-Info "Download OptiX SDK 7.x / 8.x / 9.x:"
-    Write-Info "  https://developer.nvidia.com/designworks/optix/downloads/legacy"
-    Write-Info "Installer places SDK at:"
-    Write-Info "  C:\ProgramData\NVIDIA Corporation\OptiX SDK X.Y.Z\"
-    Write-Info "Or specify the path manually:"
-    Write-Info "  .\setup.ps1 -OptixRoot ""C:\path\to\OptiX SDK X.Y.Z"""
+    if ($Mode -eq "VS") { Write-Err  "OptiX SDK not found." }
+    else                { Write-Warn "OptiX SDK not found — RTX methods will be disabled." }
+    Write-Info "Download: https://developer.nvidia.com/designworks/optix/downloads/legacy"
+    Write-Info "Or: .\setup.ps1 -OptixRoot ""C:\path\to\OptiX SDK X.Y.Z"""
 }
 
 # -------------------------------------------------------------------------
-# 4. vcpkg + required packages (HDF5, HighFive, pybind11)
+# 4. vcpkg + required packages
 # -------------------------------------------------------------------------
-Write-Step "Looking for vcpkg + required packages"
+Write-Step "Looking for vcpkg + required packages (HDF5, HighFive, pybind11)"
 
 $foundVcpkgRoot = $VcpkgRoot
 
 if (-not $foundVcpkgRoot) {
-    $vcpkgCandidates = @(
-        $env:VCPKG_ROOT,
-        "$env:USERPROFILE\vcpkg",
-        "$env:USERPROFILE\source\repos\vcpkg",
-        "C:\vcpkg",
-        "C:\tools\vcpkg",
-        "$env:LOCALAPPDATA\vcpkg",
-        "C:\src\vcpkg"
-    )
-    foreach ($c in $vcpkgCandidates) {
+    foreach ($c in @($env:VCPKG_ROOT, "$env:USERPROFILE\vcpkg",
+                     "$env:USERPROFILE\source\repos\vcpkg",
+                     "C:\vcpkg", "C:\tools\vcpkg",
+                     "$env:LOCALAPPDATA\vcpkg", "C:\src\vcpkg")) {
         if ($c -and (Test-Path "$c\vcpkg.exe")) { $foundVcpkgRoot = $c; break }
     }
 }
@@ -192,46 +191,32 @@ if (-not $foundVcpkgRoot) {
 if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
     Write-OK "vcpkg  ->  $foundVcpkgRoot"
 
-    # Check each required package
-    $vcpkgInc = "$foundVcpkgRoot\installed\x64-windows\include"
-    $vcpkgPackages = @(
-        @{ name = "hdf5";     header = "$vcpkgInc\hdf5.h";                 pkg = "hdf5:x64-windows"     },
-        @{ name = "highfive"; header = "$vcpkgInc\highfive\highfive.hpp";   pkg = "highfive:x64-windows" },
-        @{ name = "pybind11"; header = "$vcpkgInc\pybind11\embed.h";        pkg = "pybind11:x64-windows" }
+    $vcpkgInc  = "$foundVcpkgRoot\installed\x64-windows\include"
+    $vcpkgPkgs = @(
+        @{ name = "hdf5";     header = "$vcpkgInc\hdf5.h";               pkg = "hdf5:x64-windows"     },
+        @{ name = "highfive"; header = "$vcpkgInc\highfive\highfive.hpp"; pkg = "highfive:x64-windows" },
+        @{ name = "pybind11"; header = "$vcpkgInc\pybind11\embed.h";      pkg = "pybind11:x64-windows" }
     )
 
     $missingPkgs = @()
-    foreach ($p in $vcpkgPackages) {
-        if (Test-Path $p.header) {
-            Write-OK "$($p.name)  ->  found"
-        } else {
-            Write-Warn "$($p.name)  -- NOT installed"
-            $missingPkgs += $p
-        }
+    foreach ($p in $vcpkgPkgs) {
+        if (Test-Path $p.header) { Write-OK "$($p.name)  ->  found" }
+        else                     { Write-Warn "$($p.name)  -- not installed"; $missingPkgs += $p }
     }
 
     if ($missingPkgs.Count -gt 0) {
-        $pkgList = ($missingPkgs | ForEach-Object { $_.pkg }) -join "  "
-        Write-Host ""
-        $ans = Read-Host "  Install missing vcpkg packages now? [Y/n]"
+        $ans = Read-Host "`n  Install missing vcpkg packages now? [Y/n]"
         if ($ans -notmatch '^[Nn]') {
             foreach ($p in $missingPkgs) {
                 Write-Info "Installing $($p.pkg) ..."
                 & "$foundVcpkgRoot\vcpkg.exe" install $p.pkg
-                if ($LASTEXITCODE -eq 0) {
-                    Write-OK "$($p.name) installed."
-                } else {
-                    Write-Err "Failed to install $($p.pkg). Try manually:"
-                    Write-Info "  cd `"$foundVcpkgRoot`"  &&  .\vcpkg install $($p.pkg)"
-                }
+                if ($LASTEXITCODE -eq 0) { Write-OK "$($p.name) installed." }
+                else { Write-Err "Failed to install $($p.pkg). Run manually: vcpkg install $($p.pkg)" }
             }
-            Write-Info "Running: vcpkg integrate install ..."
             & "$foundVcpkgRoot\vcpkg.exe" integrate install
         } else {
-            Write-Info "Skipped. Install manually:"
-            Write-Info "  cd `"$foundVcpkgRoot`""
-            Write-Info "  .\vcpkg install $pkgList"
-            Write-Info "  .\vcpkg integrate install"
+            $pkgList = ($missingPkgs | ForEach-Object { $_.pkg }) -join "  "
+            Write-Info "Run manually: cd `"$foundVcpkgRoot`" && .\vcpkg install $pkgList"
         }
     }
 } else {
@@ -239,12 +224,9 @@ if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
     Write-Err "vcpkg not found."
     Write-Info "Install vcpkg:"
     Write-Info "  git clone https://github.com/microsoft/vcpkg `"$env:USERPROFILE\vcpkg`""
-    Write-Info "  cd `"$env:USERPROFILE\vcpkg`""
-    Write-Info "  .\bootstrap-vcpkg.bat"
+    Write-Info "  cd `"$env:USERPROFILE\vcpkg`" && .\bootstrap-vcpkg.bat"
     Write-Info "  .\vcpkg install hdf5:x64-windows highfive:x64-windows pybind11:x64-windows"
     Write-Info "  .\vcpkg integrate install"
-    Write-Info "Or specify the path manually:"
-    Write-Info "  .\setup.ps1 -VcpkgRoot ""C:\path\to\vcpkg"""
 }
 
 # -------------------------------------------------------------------------
@@ -262,9 +244,7 @@ if (-not $foundPythonRoot) {
         $pythonExe = $pyCmd.Source
         try {
             $prefix = (& $pythonExe -c "import sys; print(sys.prefix)" 2>&1).Trim()
-            if (Test-Path "$prefix\include\Python.h") {
-                $foundPythonRoot = $prefix
-            }
+            if (Test-Path "$prefix\include\Python.h") { $foundPythonRoot = $prefix }
         } catch {}
     }
 }
@@ -283,11 +263,7 @@ if (-not $foundPythonRoot) {
 
 if (-not $foundPythonRoot) {
     foreach ($p in @("C:\Python313","C:\Python312","C:\Python311","C:\Python310")) {
-        if (Test-Path "$p\include\Python.h") {
-            $foundPythonRoot = $p
-            $pythonExe = "$p\python.exe"
-            break
-        }
+        if (Test-Path "$p\include\Python.h") { $foundPythonRoot = $p; $pythonExe = "$p\python.exe"; break }
     }
 }
 
@@ -297,10 +273,9 @@ if (-not $foundPythonRoot) {
             Get-ChildItem $regBase | Sort-Object Name -Descending | ForEach-Object {
                 if (-not $foundPythonRoot) {
                     try {
-                        $installPath = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction Stop).'(default)'
-                        if ($installPath -and (Test-Path "$installPath\include\Python.h")) {
-                            $foundPythonRoot = $installPath.TrimEnd('\')
-                            $pythonExe = "$foundPythonRoot\python.exe"
+                        $ip = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction Stop).'(default)'
+                        if ($ip -and (Test-Path "$ip\include\Python.h")) {
+                            $foundPythonRoot = $ip.TrimEnd('\'); $pythonExe = "$foundPythonRoot\python.exe"
                         }
                     } catch {}
                 }
@@ -316,61 +291,43 @@ if ($foundPythonRoot -and (Test-Path "$foundPythonRoot\include\Python.h")) {
         $pythonLib = "python$pyVer.lib"
     } catch {}
     if (-not $pythonLib) {
-        $libFile = Get-ChildItem "$foundPythonRoot\libs" -Filter "python*.lib" -ErrorAction SilentlyContinue |
-                   Where-Object { $_.Name -notmatch '_d\.lib$' } |
-                   Sort-Object Name -Descending | Select-Object -First 1
-        if ($libFile) { $pythonLib = $libFile.Name }
+        $lf = Get-ChildItem "$foundPythonRoot\libs" -Filter "python*.lib" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -notmatch '_d\.lib$' } | Sort-Object Name -Descending | Select-Object -First 1
+        if ($lf) { $pythonLib = $lf.Name }
     }
     Write-OK "Python  ->  $foundPythonRoot"
     Write-OK "Lib     ->  $pythonLib"
 } else {
     $foundPythonRoot = ""; $pythonExe = ""; $pythonLib = ""
-    Write-Err "Python not found (need include\Python.h)."
+    if ($Mode -eq "VS") { Write-Err  "Python not found (need include\Python.h)." }
+    else                { Write-Warn "Python not found — visualizeLastResult() will be unavailable." }
     Write-Info "Install Python 3.10+ from: https://www.python.org/downloads/"
-    Write-Info "Check 'Add Python to PATH' during installation."
-    Write-Info "Or specify manually:  .\setup.ps1 -PythonRoot ""C:\path\to\python"""
 }
 
 # -------------------------------------------------------------------------
-# 6. Python packages for visualization
+# 6. Python packages
 # -------------------------------------------------------------------------
 Write-Step "Checking Python packages (numpy, pandas, plotly, matplotlib)"
 
-$requiredPkgs = @("numpy", "pandas", "plotly", "matplotlib")
-$missingPkgs  = @()
-
 if ($pythonExe -and (Test-Path $pythonExe)) {
-    foreach ($pkg in $requiredPkgs) {
+    $missingPyPkgs = @()
+    foreach ($pkg in @("numpy","pandas","plotly","matplotlib")) {
         $check = (& $pythonExe -c "import importlib.util; print('ok' if importlib.util.find_spec('$pkg') else 'missing')" 2>&1).Trim()
-        if ($check -eq 'ok') {
-            Write-OK $pkg
-        } else {
-            Write-Warn "$pkg  -- not installed"
-            $missingPkgs += $pkg
-        }
+        if ($check -eq 'ok') { Write-OK $pkg } else { Write-Warn "$pkg  -- not installed"; $missingPyPkgs += $pkg }
     }
 
-    if ($missingPkgs.Count -gt 0) {
-        Write-Host ""
-        $ans = Read-Host "  Install missing packages via pip now? [Y/n]"
+    if ($missingPyPkgs.Count -gt 0) {
+        $ans = Read-Host "`n  Install missing packages via pip now? [Y/n]"
         if ($ans -notmatch '^[Nn]') {
-            foreach ($pkg in $missingPkgs) {
-                Write-Info "Installing $pkg ..."
+            foreach ($pkg in $missingPyPkgs) {
                 & $pythonExe -m pip install $pkg --quiet
-                if ($LASTEXITCODE -eq 0) {
-                    Write-OK "$pkg installed"
-                } else {
-                    Write-Err "Failed to install $pkg"
-                    Write-Info "Try manually:  $pythonExe -m pip install $pkg"
-                }
+                if ($LASTEXITCODE -eq 0) { Write-OK "$pkg installed" }
+                else { Write-Err "Failed to install $pkg. Run: $pythonExe -m pip install $pkg" }
             }
-        } else {
-            Write-Info "Skipped. Install manually:"
-            Write-Info "  $pythonExe -m pip install $($missingPkgs -join ' ')"
         }
     }
 } else {
-    Write-Warn "Python not found -- package check skipped."
+    Write-Warn "Python not found — package check skipped."
 }
 
 # -------------------------------------------------------------------------
@@ -381,65 +338,62 @@ Write-Host "================================================================" -F
 Write-Host "  Summary" -ForegroundColor White
 Write-Host "================================================================" -ForegroundColor White
 
+# In Library mode: CUDA / OptiX / Python are optional (reduce available methods).
+# In VS mode: all are required.
 $allOk = $true
 
 function Show-Status {
     param([string]$label, [string]$value, [bool]$required = $true)
+    # $required: if false AND Mode=="Library", show as optional (yellow), not error
+    $isRequired = $required -or ($script:Mode -eq "VS")
     if ($value) {
-        Write-Host ("  {0,-14} {1}" -f $label, $value) -ForegroundColor Green
-    } elseif ($required) {
-        Write-Host ("  {0,-14} NOT FOUND  <--" -f $label) -ForegroundColor Red
+        Write-Host ("  {0,-16} {1}" -f $label, $value) -ForegroundColor Green
+    } elseif ($isRequired) {
+        Write-Host ("  {0,-16} NOT FOUND  <--" -f $label) -ForegroundColor Red
         $script:allOk = $false
     } else {
-        Write-Host ("  {0,-14} not found (optional)" -f $label) -ForegroundColor Yellow
+        Write-Host ("  {0,-16} not found  (optional — some methods disabled)" -f $label) -ForegroundColor Yellow
     }
 }
 
-Show-Status "CUDA"      $cudaVersion
-Show-Status "GPU arch"  $gpuArch
-Show-Status "OptiX"     $foundOptixRoot
-Show-Status "vcpkg"     $foundVcpkgRoot
-Show-Status "Python"    $foundPythonRoot
-Show-Status "PythonLib" $pythonLib
+Show-Status "CUDA"      $cudaVersion     -required $false   # optional in Library mode
+Show-Status "GPU arch"  $gpuArch         -required $false
+Show-Status "OptiX"     $foundOptixRoot  -required $false   # optional in Library mode
+Show-Status "vcpkg"     $foundVcpkgRoot  -required $true    # always required
+Show-Status "Python"    $foundPythonRoot -required $false   # optional in Library mode
+Show-Status "PythonLib" $pythonLib       -required $false
 
-# -------------------------------------------------------------------------
-# 7b. Set PYTHONHOME in user environment (needed by embedded pybind11)
-# -------------------------------------------------------------------------
+# Set PYTHONHOME (both modes — needed for embedded Python at runtime)
 if ($foundPythonRoot) {
     $currentPH = [System.Environment]::GetEnvironmentVariable("PYTHONHOME", "User")
     if ($currentPH -ne $foundPythonRoot) {
         [System.Environment]::SetEnvironmentVariable("PYTHONHOME", $foundPythonRoot, "User")
-        Write-OK "PYTHONHOME set to: $foundPythonRoot  (user environment)"
-        Write-Warn "Restart Visual Studio / terminal for PYTHONHOME to take effect."
+        Write-OK "PYTHONHOME set: $foundPythonRoot"
+        Write-Warn "Restart terminal / VS for PYTHONHOME to take effect."
     } else {
-        Write-OK "PYTHONHOME already set correctly."
+        Write-OK "PYTHONHOME already correct."
     }
 }
 
-# -------------------------------------------------------------------------
-# 8. Generate LocalPaths.props
-# -------------------------------------------------------------------------
 if (-not $allOk) {
     Write-Host ""
-    Write-Err "Some required dependencies were not found."
-    Write-Info "Fix the issues above and run setup.ps1 again."
-    Write-Info "You can override paths with parameters:"
-    Write-Info "  .\setup.ps1 -VcpkgRoot ""C:\path"" -OptixRoot ""C:\path"" -PythonRoot ""C:\path"""
+    Write-Err "Required dependencies are missing — see above."
+    Write-Info "Fix the issues and run setup.ps1 again."
+    Write-Info "Override paths: .\setup.ps1 -VcpkgRoot C:\path -OptixRoot C:\path -PythonRoot C:\path"
     exit 1
 }
 
-if ((Test-Path $PropsFile) -and -not $Force) {
-    Write-Host ""
-    Write-Warn "$PropsFile already exists."
-    $ans = Read-Host "  Overwrite? [y/N]"
-    if ($ans -notmatch '^[Yy]') {
-        Write-Info "Skipped. Use -Force to overwrite without prompting."
-        exit 0
-    }
-}
+# =========================================================================
+# VS MODE — generate LocalPaths.props + patch SM2D.vcxproj
+# =========================================================================
+if ($Mode -eq "VS") {
 
-# NOTE: closing "@ must be at column 0 (no leading whitespace)
-$propsContent = @"
+    if ((Test-Path $PropsFile) -and -not $Force) {
+        $ans = Read-Host "`n  $PropsFile already exists. Overwrite? [y/N]"
+        if ($ans -notmatch '^[Yy]') { Write-Info "Skipped. Use -Force to overwrite."; exit 0 }
+    }
+
+    $propsContent = @"
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated by setup.ps1 on $(Get-Date -Format 'yyyy-MM-dd HH:mm') -->
 <!-- DO NOT COMMIT this file (it is in .gitignore). -->
@@ -458,42 +412,144 @@ $propsContent = @"
 </Project>
 "@
 
-$propsContent | Set-Content -Path $PropsFile -Encoding UTF8
-Write-OK "Created: $PropsFile"
+    $propsContent | Set-Content -Path $PropsFile -Encoding UTF8
+    Write-OK "Created: $PropsFile"
 
-# -------------------------------------------------------------------------
-# 9. Patch CUDA version in SM2D.vcxproj
-# -------------------------------------------------------------------------
-# VS CUDA plugin requires a literal version string in the Import path --
-# it cannot resolve MSBuild macros like $(CudaVersion) there.
-# Detect what version is currently in the file and update it if needed.
-Write-Step "Patching CUDA version in SM2D.vcxproj"
+    # Patch CUDA version in SM2D.vcxproj
+    Write-Step "Patching CUDA version in SM2D.vcxproj"
+    $vcxprojPath = Join-Path $ScriptDir "SM2D\SM2D.vcxproj"
+    if (Test-Path $vcxprojPath) {
+        $vcxContent = Get-Content $vcxprojPath -Raw
+        $currentVer = ""
+        if ($vcxContent -match '<Import[^>]+CUDA (\d+\.\d+)\.props') { $currentVer = $Matches[1] }
 
-$vcxprojPath = Join-Path $ScriptDir "SM2D\SM2D.vcxproj"
-if (Test-Path $vcxprojPath) {
-    $vcxContent = Get-Content $vcxprojPath -Raw
-
-    # Find the version in the actual <Import> line (not in comments)
-    $currentVer = ""
-    if ($vcxContent -match '<Import[^>]+CUDA (\d+\.\d+)\.props') { $currentVer = $Matches[1] }
-
-    if ($currentVer -eq $cudaVersion) {
-        Write-OK "SM2D.vcxproj already has CUDA $cudaVersion -- no change needed."
-    } elseif ($currentVer) {
-        $vcxContent = $vcxContent -replace "CUDA $([regex]::Escape($currentVer))\.props",   "CUDA $cudaVersion.props"
-        $vcxContent = $vcxContent -replace "CUDA $([regex]::Escape($currentVer))\.targets", "CUDA $cudaVersion.targets"
-        [System.IO.File]::WriteAllText($vcxprojPath, $vcxContent, [System.Text.UTF8Encoding]::new($false))
-        Write-OK "Updated SM2D.vcxproj: CUDA $currentVer -> CUDA $cudaVersion"
-        Write-Warn "Close and reopen the solution in Visual Studio to pick up the change."
+        if ($currentVer -eq $cudaVersion) {
+            Write-OK "SM2D.vcxproj already has CUDA $cudaVersion."
+        } elseif ($currentVer) {
+            $vcxContent = $vcxContent -replace "CUDA $([regex]::Escape($currentVer))\.props",   "CUDA $cudaVersion.props"
+            $vcxContent = $vcxContent -replace "CUDA $([regex]::Escape($currentVer))\.targets", "CUDA $cudaVersion.targets"
+            [System.IO.File]::WriteAllText($vcxprojPath, $vcxContent, [System.Text.UTF8Encoding]::new($false))
+            Write-OK "Updated SM2D.vcxproj: CUDA $currentVer -> CUDA $cudaVersion"
+            Write-Warn "Close and reopen the .sln in Visual Studio."
+        } else {
+            Write-Warn "Could not detect CUDA version in SM2D.vcxproj — update manually."
+        }
     } else {
-        Write-Warn "Could not detect CUDA version in SM2D.vcxproj -- please update it manually."
-        Write-Info "Find the two lines with 'CUDA X.Y.props' / '.targets' and set them to CUDA $cudaVersion."
+        Write-Warn "SM2D.vcxproj not found."
     }
-} else {
-    Write-Warn "SM2D.vcxproj not found at expected path: $vcxprojPath"
+
+    Write-Host ""
+    Write-Host "  Next step: open SM2D\SM2D.sln in Visual Studio 2022," -ForegroundColor White
+    Write-Host "  then Build -> Rebuild Solution  (Release | x64)." -ForegroundColor White
+    Write-Host ""
+    exit 0
 }
 
+# =========================================================================
+# LIBRARY MODE — cmake + build + copy to dist\
+# =========================================================================
+
+Write-Step "Building srp.lib with CMake"
+
+$buildDir = Join-Path $ScriptDir "build_dist"
+$distDir  = Join-Path $ScriptDir "dist"
+
+if ($Force) {
+    if (Test-Path $buildDir) { Remove-Item $buildDir -Recurse -Force }
+    if (Test-Path $distDir)  { Remove-Item $distDir  -Recurse -Force }
+}
+
+# ---- cmake configure ----
+$cmakeArgs = @("-B", $buildDir)
+
+if ($foundVcpkgRoot) {
+    $cmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$foundVcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+    $cmakeArgs += "-DVCPKG_TARGET_TRIPLET=x64-windows"
+}
+
+# Disable missing optional features
+if (-not $cudaPath) {
+    $cmakeArgs += "-DSM3D_ENABLE_CUDA=OFF"
+    $cmakeArgs += "-DSM3D_ENABLE_OPTIX=OFF"
+} elseif (-not $foundOptixRoot) {
+    $cmakeArgs += "-DSM3D_ENABLE_OPTIX=OFF"
+} else {
+    $cmakeArgs += "-DOPTIX_INSTALL_DIR=$foundOptixRoot"
+}
+if (-not $foundPythonRoot) {
+    $cmakeArgs += "-DSM3D_ENABLE_PYTHON=OFF"
+}
+
+Write-Info "cmake $($cmakeArgs -join ' ')"
+& cmake @cmakeArgs
+if ($LASTEXITCODE -ne 0) { Write-Err "cmake configure failed."; exit 1 }
+
+# ---- cmake build ----
+Write-Step "Compiling (Release)..."
+& cmake --build $buildDir --config Release
+if ($LASTEXITCODE -ne 0) { Write-Err "cmake build failed."; exit 1 }
+
+# ---- copy to dist\ ----
+Write-Step "Copying outputs to dist\"
+
+New-Item -ItemType Directory -Force (Join-Path $distDir "include") | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $distDir "lib")     | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $distDir "bin")     | Out-Null
+
+# Public header
+Copy-Item (Join-Path $ScriptDir "SM2D\SRPLibrary.h") (Join-Path $distDir "include") -Force
+Write-OK "dist\include\SRPLibrary.h"
+
+# Static library (multi-config VS generator puts it in Release\; Ninja puts it directly)
+$libCandidates = @(
+    (Join-Path $buildDir "Release\srp.lib"),
+    (Join-Path $buildDir "srp.lib")
+)
+$libSrc = $libCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($libSrc) {
+    Copy-Item $libSrc (Join-Path $distDir "lib\srp.lib") -Force
+    Write-OK "dist\lib\srp.lib"
+} else {
+    Write-Err "srp.lib not found in build_dist — build may have failed."
+}
+
+# OptiX PTX shaders
+$ptxFiles = Get-ChildItem $buildDir -Filter "*.ptx" -Recurse -ErrorAction SilentlyContinue
+foreach ($ptx in $ptxFiles) {
+    Copy-Item $ptx.FullName (Join-Path $distDir "bin") -Force
+    Write-OK "dist\bin\$($ptx.Name)"
+}
+
+# HDF5 runtime DLL (needed next to user's exe)
+if ($foundVcpkgRoot) {
+    $hdf5dll = Join-Path $foundVcpkgRoot "installed\x64-windows\bin\hdf5.dll"
+    if (Test-Path $hdf5dll) {
+        Copy-Item $hdf5dll (Join-Path $distDir "bin") -Force
+        Write-OK "dist\bin\hdf5.dll"
+    }
+}
+
+# ---- print usage instructions ----
+$methods = "CentroidCPU, PixelGridCPU"
+if ($cudaPath)        { $methods += ", CentroidGPU, PixelGridGPU" }
+if ($foundOptixRoot)  { $methods += ", CentroidRTX, PixelGridRTX" }
+
 Write-Host ""
-Write-Host "  Next step: close and reopen SM2D\SM2D.sln in Visual Studio 2022," -ForegroundColor White
-Write-Host "  then run  Build -> Rebuild Solution (Release x64)." -ForegroundColor White
+Write-Host "================================================================" -ForegroundColor Green
+Write-Host "  dist\ is ready!" -ForegroundColor Green
+Write-Host "================================================================" -ForegroundColor Green
+Write-Host "  Available methods: $methods" -ForegroundColor White
+Write-Host ""
+Write-Host "  To use in a CMake project:" -ForegroundColor White
+Write-Info "    target_include_directories(my_app PRIVATE path/to/dist/include)"
+Write-Info "    target_link_libraries(my_app PRIVATE path/to/dist/lib/srp.lib)"
+Write-Host ""
+Write-Host "  Or add the source directly:" -ForegroundColor White
+Write-Info "    add_subdirectory(path/to/SM3D_GPU_CC10)"
+Write-Info "    target_link_libraries(my_app PRIVATE srp)"
+Write-Host ""
+if ($ptxFiles.Count -gt 0) {
+    Write-Warn "Copy dist\bin\*.ptx next to your .exe for RTX methods."
+}
+Write-Warn "Copy dist\bin\hdf5.dll next to your .exe."
 Write-Host ""
