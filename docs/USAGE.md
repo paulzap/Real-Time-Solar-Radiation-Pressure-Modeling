@@ -61,6 +61,40 @@ pip install pybind11   # or vcpkg
 
 ## 2. Build with CMake
 
+### Quickest path — setup script (recommended)
+
+The setup scripts handle everything: check dependencies, install missing
+packages, run CMake, compile, and copy outputs to `dist/`.
+
+**Windows:**
+```powershell
+.\setup.ps1 -Mode Library
+# outputs: dist\include\SRPLibrary.h  dist\lib\srp.lib  dist\bin\hdf5.dll
+```
+
+**Linux / macOS:**
+```bash
+chmod +x setup.sh && ./setup.sh
+# outputs: dist/include/SRPLibrary.h  dist/lib/libsrp.a
+```
+
+Override non-default paths:
+```powershell
+.\setup.ps1 -Mode Library -VcpkgRoot D:\tools\vcpkg -OptixRoot "D:\SDK\OptiX 9.1.0"
+```
+```bash
+./setup.sh --vcpkg ~/vcpkg --optix /opt/optix
+```
+
+Use `--force` / `-Force` to rebuild from scratch.
+
+After the script: link `dist/lib/srp.lib` (or `libsrp.a`) and include
+`dist/include/` in your project — that's it.
+
+---
+
+### Manual CMake build
+
 The `CMakeLists.txt` auto-detects what's available and enables only the supported methods:
 
 | What's installed | Methods available |

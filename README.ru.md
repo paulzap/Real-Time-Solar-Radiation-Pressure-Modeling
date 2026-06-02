@@ -394,9 +394,54 @@ engine.compute(best);
 
 ---
 
-## Настройка с нуля
+## Использование библиотеки (без Visual Studio)
 
-Этот раздел для тех, кто разворачивает проект на новой машине.
+Если вы хотите **подключить библиотеку к своему проекту**, а не разрабатывать её в VS —
+используйте скрипт сборки. Он сам проверяет зависимости, собирает `srp.lib` / `libsrp.a`
+и кладёт результат в папку `dist/`. CUDA и OptiX — необязательны.
+
+**Windows (PowerShell):**
+```powershell
+.\setup.ps1 -Mode Library
+```
+
+**Linux / macOS (bash):**
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+После завершения скрипта готовые файлы лежат в `dist/`:
+```
+dist/
+├── include/SRPLibrary.h   ← единственный заголовок
+├── lib/srp.lib            ← статическая библиотека  (libsrp.a на Linux)
+└── bin/hdf5.dll           ← рантайм-зависимость (+ *.ptx для OptiX-методов)
+```
+
+Подключить в своём CMake-проекте:
+```cmake
+target_include_directories(my_app PRIVATE path/to/dist/include)
+target_link_libraries(my_app PRIVATE path/to/dist/lib/srp.lib)
+```
+
+Нестандартные пути:
+```powershell
+.\setup.ps1 -Mode Library -VcpkgRoot D:\tools\vcpkg -OptixRoot "D:\SDK\OptiX 9.1.0"
+```
+```bash
+./setup.sh --vcpkg ~/vcpkg --optix /opt/optix
+```
+
+Пересобрать с нуля — добавьте `-Force` / `--force`.
+
+Подробное описание API и примеры кода — в [docs/USAGE.md](docs/USAGE.md).
+
+---
+
+## Настройка с нуля (разработка в Visual Studio)
+
+Этот раздел для тех, кто разворачивает **проект разработчика** на новой машине.
 Последовательность шагов обязательна: каждый шаг зависит от предыдущего.
 
 > **Краткий путь:** если у вас уже установлены CUDA, OptiX и Python —

@@ -6,6 +6,7 @@
 [![CUDA 12.4+](https://img.shields.io/badge/CUDA-12.4%2B-76B900?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 [![OptiX 9.1](https://img.shields.io/badge/OptiX-9.1-76B900?logo=nvidia)](https://developer.nvidia.com/rtx/ray-tracing/optix)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows)](https://www.microsoft.com)
+[![Linux](https://img.shields.io/badge/Linux-Ubuntu%2020.04%2B-E95420?logo=ubuntu)](https://ubuntu.com)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022-5C2D91?logo=visualstudio)](https://visualstudio.microsoft.com/)
 
 > Accurate, GPU-accelerated solar radiation pressure (SRP) force and moment
@@ -130,63 +131,90 @@ Download and extract `.h5` files into `SM2D/data3d_hdf5_0.5/`
 
 ## Build
 
-### Option A — automated setup (recommended)
+Three build paths are available. Choose the one that matches your situation.
 
-Run `setup.ps1` from the repository root in **PowerShell**:
+### Option A — one-command script build (recommended for library users)
 
+These scripts check and install all dependencies automatically, then build
+`srp.lib` / `libsrp.a` and copy the result to `dist/`.
+CUDA and OptiX are **optional** — the script enables only what is installed.
+
+**Windows (PowerShell):**
 ```powershell
-cd e:\GPU_projects\SM3D_GPU_CC10
-.\setup.ps1
+.\setup.ps1 -Mode Library
 ```
 
-The script auto-detects CUDA, OptiX, vcpkg, Python; patches the CUDA version
-in `SM2D.vcxproj`; generates `SM2D\LocalPaths.props`; installs missing vcpkg
-packages (with prompt); and sets `PYTHONHOME` in your user environment.
-
-If any dependency is in a non-default location, pass it explicitly:
-
-```powershell
-.\setup.ps1 -OptixRoot "D:\SDK\OptiX 9.1.0" -VcpkgRoot "D:\tools\vcpkg" -PythonRoot "C:\Python312"
+**Linux / macOS (bash):**
+```bash
+chmod +x setup.sh
+./setup.sh
 ```
 
-Use `-Force` to overwrite an existing `LocalPaths.props`.
+After the script finishes, the ready-to-use files are in `dist/`:
 
-### Option B — manual
-
-```powershell
-# 1. Install vcpkg dependencies
-vcpkg install hdf5:x64-windows highfive:x64-windows pybind11:x64-windows
-
-# 2. Copy and fill in the local-paths template
-Copy-Item SM2D\LocalPaths.props.template SM2D\LocalPaths.props
-# Edit SM2D\LocalPaths.props with your CUDA/OptiX/vcpkg/Python paths
-
-# 3. If your CUDA version is not 12.4, edit SM2D\SM2D.vcxproj manually:
-#    search for "CUDA 12.4.props" and "CUDA 12.4.targets" and replace the version number.
-#    (VS CUDA plugin requires a literal version string — macros are NOT supported there.)
+```
+dist/
+├── include/SRPLibrary.h   ← only header you need
+├── lib/srp.lib            ← static library  (libsrp.a on Linux)
+└── bin/hdf5.dll           ← runtime DLL (Windows); *.ptx for OptiX methods
 ```
 
-### Build in Visual Studio
+Link in your CMake project:
+```cmake
+target_include_directories(my_app PRIVATE path/to/dist/include)
+target_link_libraries(my_app PRIVATE path/to/dist/lib/srp.lib)
+```
 
+Override paths if dependencies are in non-default locations:
+```powershell
+.\setup.ps1 -Mode Library -OptixRoot "D:\SDK\OptiX 9.1.0" -VcpkgRoot "D:\tools\vcpkg"
+```
+```bash
+./setup.sh --optix /opt/optix --vcpkg ~/vcpkg
+```
+
+---
+
+### Option B — Visual Studio development setup (Windows)
+
+Run `setup.ps1` (default VS mode) to generate `LocalPaths.props` and
+open the project in VS 2022:
+
+```powershell
+.\setup.ps1          # generates SM2D\LocalPaths.props, sets PYTHONHOME
+```
+
+Then:
 1. Open `SM2D.sln` in Visual Studio 2022
 2. Select configuration: **Release | x64** ← **required**
 3. **Build → Rebuild Solution**
 
-> **Do NOT use Debug configuration for GPU kernels.** Debug CUDA builds allocate
-> more registers per thread and exceed the SM resource limit on complex kernels,
-> causing `CUDA error 701: too many resources requested for launch`.
-
-The pre-build step automatically compiles the four OptiX shader source files
-(`optix_shaders_center.cu`, `optix_shaders_center_bench.cu`,
-`optix_shaders_pixel_grid.cu`, `optix_shaders_pixel_grid_bench.cu`) into PTX
-modules placed next to the executable.
-
-### Running
+> **Do NOT use Debug configuration for GPU kernels.** Debug CUDA builds exceed
+> SM register limits on complex kernels: `CUDA error 701`.
 
 ```powershell
 cd x64\Release
 .\SM3D.exe ..\data3d_hdf5_0.5
 ```
+
+---
+
+### Option C — CMake directly (any platform)
+
+```bash
+# CPU-only (no GPU required)
+cmake -B build -DSM3D_ENABLE_CUDA=OFF -DSM3D_ENABLE_OPTIX=OFF \
+      -DCMAKE_TOOLCHAIN_FILE=~/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build --config Release
+
+# Full build (CUDA + OptiX)
+cmake -B build \
+      -DOPTIX_INSTALL_DIR=/opt/optix \
+      -DCMAKE_TOOLCHAIN_FILE=~/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build --config Release
+```
+
+See [docs/USAGE.md](docs/USAGE.md) for a complete integration guide.
 
 ---
 
