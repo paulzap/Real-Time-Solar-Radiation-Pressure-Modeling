@@ -166,9 +166,9 @@ struct SRPEngine::Impl {
         // Python - without explicit Lib / site-packages entries it cannot find
         // numpy / plotly / matplotlib even if they are installed system-wide.
         //
-        // Portability: PYTHONHOME env var takes precedence over the compile-time default.
-        // On a new machine set PYTHONHOME in system environment, or in VS:
-        //   Project -> Properties -> Debugging -> Environment -> PYTHONHOME=C:\...\Python3XX
+        // Python version used at runtime must match the pybind11 ABI (python312.lib).
+        // PYTHONHOME is auto-detected (newest 64-bit CPython on PATH / LOCALAPPDATA).
+        // To force a specific installation set SRP_PYTHONHOME before launching.
         // PYTHONHOME must be set before Py_Initialize() (before scoped_interpreter) to
         // suppress "Could not find platform independent libraries <prefix>".
         if (!Py_IsInitialized()) {
@@ -180,44 +180,60 @@ struct SRPEngine::Impl {
             // "Could not find platform independent libraries <prefix>" warnings.
 
 #ifdef _WIN32
-            char*  python_home_buf = nullptr;
-            size_t python_home_len = 0;
-            _dupenv_s(&python_home_buf, &python_home_len, "PYTHONHOME");
-            const bool had_pythonhome = (python_home_buf != nullptr && python_home_len > 0);
-            std::string python_root = had_pythonhome ? std::string(python_home_buf) : "";
-            free(python_home_buf);
+            // Do NOT trust the system PYTHONHOME — it may point to a stale Python
+            // installation (e.g. Python37-32) that is incompatible with the pybind11
+            // version compiled into this binary, causing "SRE module mismatch" crashes.
+            // We always auto-detect the newest 64-bit Python and set PYTHONHOME ourselves.
+            // To force a specific Python, set SRP_PYTHONHOME (not PYTHONHOME) before launch.
+            std::string python_root;
 
-            if (!had_pythonhome) {
-                // Auto-detect: scan %LOCALAPPDATA%\Programs\Python\PythonXXX,
-                // pick the highest version that has include\Python.h.
-                char*  localappdata_buf = nullptr;
-                size_t localappdata_len = 0;
-                _dupenv_s(&localappdata_buf, &localappdata_len, "LOCALAPPDATA");
-                if (localappdata_buf && localappdata_len > 0) {
-                    std::string py_base = std::string(localappdata_buf) + "\\Programs\\Python";
+            // 1. SRP_PYTHONHOME — explicit per-app override, separate from system PYTHONHOME
+            {
+                char* buf = nullptr; size_t len = 0;
+                _dupenv_s(&buf, &len, "SRP_PYTHONHOME");
+                if (buf && len > 0) python_root = std::string(buf);
+                free(buf);
+            }
+
+            if (python_root.empty()) {
+                // 2. Scan %LOCALAPPDATA%\Programs\Python\ for the newest 64-bit CPython.
+                //    Skip names with '-' (e.g. Python37-32 = 32-bit build).
+                //    Compare by integer version, not string ("Python37" < "Python312").
+                char* la_buf = nullptr; size_t la_len = 0;
+                _dupenv_s(&la_buf, &la_len, "LOCALAPPDATA");
+                if (la_buf && la_len > 0) {
+                    std::string py_base = std::string(la_buf) + "\\Programs\\Python";
+                    int best_ver = 0;
                     try {
-                        for (const auto& entry : std::filesystem::directory_iterator(py_base)) {
-                            if (!entry.is_directory()) continue;
-                            std::string candidate = entry.path().string();
-                            if (std::filesystem::exists(candidate + "\\include\\Python.h")) {
-                                if (python_root.empty() || candidate > python_root)
-                                    python_root = candidate;
-                            }
+                        for (const auto& e : std::filesystem::directory_iterator(py_base)) {
+                            if (!e.is_directory()) continue;
+                            std::string name = e.path().filename().string();
+                            if (name.rfind("Python3", 0) != 0) continue; // must start with Python3
+                            if (name.find('-') != std::string::npos) continue; // skip 32-bit
+                            if (!std::filesystem::exists(e.path().string() + "\\include\\Python.h")) continue;
+                            try {
+                                int ver = std::stoi(name.substr(7)); // "312" → 312, "310" → 310
+                                if (ver > best_ver) { best_ver = ver; python_root = e.path().string(); }
+                            } catch (...) {}
                         }
                     } catch (...) {}
                 }
-                free(localappdata_buf);
-                // Fallback: common system-wide Windows paths
-                if (python_root.empty()) {
-                    for (const char* p : {"C:\\Python313","C:\\Python312","C:\\Python311","C:\\Python310"}) {
-                        if (std::filesystem::exists(std::string(p) + "\\include\\Python.h")) {
-                            python_root = p; break;
-                        }
+                free(la_buf);
+            }
+
+            // 3. Fallback: common system-wide install paths
+            if (python_root.empty()) {
+                for (const char* p : {"C:\\Python313","C:\\Python312","C:\\Python311","C:\\Python310"}) {
+                    if (std::filesystem::exists(std::string(p) + "\\include\\Python.h")) {
+                        python_root = p; break;
                     }
                 }
-                if (python_root.empty()) python_root = "C:\\Python312"; // last resort
-                _putenv_s("PYTHONHOME", python_root.c_str());
             }
+            if (python_root.empty())
+                python_root = "C:\\Users\\zapevalin\\AppData\\Local\\Programs\\Python\\Python312";
+
+            // Always override PYTHONHOME — pybind11 needs it to match the compiled-in version
+            _putenv_s("PYTHONHOME", python_root.c_str());
 #else // Linux / macOS
             const char* phenv = std::getenv("PYTHONHOME");
             const bool had_pythonhome = (phenv != nullptr);
