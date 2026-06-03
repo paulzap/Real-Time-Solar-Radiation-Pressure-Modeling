@@ -70,12 +70,14 @@ packages, run CMake, compile, and copy outputs to `dist/`.
 ```powershell
 .\setup.ps1 -Mode Library
 # outputs: dist\include\SRPLibrary.h  dist\lib\srp.lib  dist\bin\hdf5.dll
+#           dist\python\visualize3d.py  dist\SRPLibraryConfig.cmake
 ```
 
 **Linux / macOS:**
 ```bash
 chmod +x setup.sh && ./setup.sh
 # outputs: dist/include/SRPLibrary.h  dist/lib/libsrp.a
+#           dist/python/visualize3d.py  dist/SRPLibraryConfig.cmake
 ```
 
 Override non-default paths:
@@ -88,8 +90,8 @@ Override non-default paths:
 
 Use `--force` / `-Force` to rebuild from scratch.
 
-After the script: link `dist/lib/srp.lib` (or `libsrp.a`) and include
-`dist/include/` in your project — that's it.
+After the script: use `find_package(SRPLibrary CONFIG HINTS "path/to/dist")` in your
+CMakeLists.txt — it automatically handles all dependencies. See §3 below.
 
 ---
 
@@ -174,40 +176,58 @@ cmake --build build_full
 
 ## 3. Integrate in Your Project
 
-### Option A — CMake `add_subdirectory` (simplest)
+### Option A — `find_package` with prebuilt dist/ (recommended)
 
-If your project also uses CMake, add the SRP library as a subdirectory:
+After running the setup script, `dist/` contains a ready-to-use `SRPLibraryConfig.cmake`
+that automatically pulls in all required dependencies (HDF5, Python) based on what was
+compiled in. No manual `-DCUDA` defines or `-lpython` flags needed:
 
 ```cmake
-# In your CMakeLists.txt:
-add_subdirectory(path/to/SM3D_GPU_CC10)   # adds the srp target
+cmake_minimum_required(VERSION 3.15)
+project(my_project LANGUAGES CXX)
+
+# Point CMake at the dist/ folder produced by setup.sh / setup.ps1
+find_package(SRPLibrary REQUIRED CONFIG
+    HINTS "/path/to/Real-Time-Solar-Radiation-Pressure-Modeling/dist")
 
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE srp)
-# No need to set include dirs — srp exports them via target_include_directories PUBLIC
+target_link_libraries(my_app PRIVATE SRPLibrary::srp)
 ```
 
-### Option B — Link the prebuilt .lib in Visual Studio
+`SRPLibrary::srp` is an imported target — include dirs, Python, and HDF5 are
+all set automatically as transitive dependencies.
+
+**Visualization** (`visualizeLastResult`): copy `dist/python/visualize3d.py`
+to the directory where your executable runs. The library imports this script
+at runtime via `sys.path`.
+
+### Option B — CMake `add_subdirectory` (if you have the full source)
+
+```cmake
+add_subdirectory(path/to/Real-Time-Solar-Radiation-Pressure-Modeling)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE srp)
+```
+
+### Option C — Link the prebuilt lib in Visual Studio
 
 1. Build the library first (see §2 above) to produce `srp.lib`
 2. In your VS project:
-   - **Project → Properties → C/C++ → Additional Include Directories** → add path to `SM2D/` folder
+   - **Project → Properties → C/C++ → Additional Include Directories** → add path to `dist/include/`
    - **Linker → Input → Additional Dependencies** → add `srp.lib`
-   - **Linker → General → Additional Library Directories** → add path to `build_full/Release/`
-3. Copy `*.ptx` files next to your `.exe` (only needed for OptiX/RTX methods)
-4. Copy `hdf5.dll` / `hdf5_D.dll` next to your `.exe` (from vcpkg `bin/`)
+   - **Linker → General → Additional Library Directories** → add path to `dist/lib/`
+3. Copy `dist/bin/*.ptx` next to your `.exe` (OptiX/RTX methods only)
+4. Copy `dist/bin/hdf5.dll` next to your `.exe`
+5. Copy `dist/python/visualize3d.py` to your working directory
 
-### Option C — Link the prebuilt .lib in VS Code (CMake)
+> **Note:** if `srp.lib` was built with Python support (default), you must also link
+> `python3X.lib`. The easiest way is to use Option A (`SRPLibraryConfig.cmake`) — it
+> handles this automatically. For manual VS linking, add the Python `.lib` to
+> Additional Dependencies and its `libs/` folder to Additional Library Directories.
 
-```cmake
-find_library(SRP_LIB srp PATHS path/to/build/Release)
-target_link_libraries(my_app PRIVATE ${SRP_LIB})
-target_include_directories(my_app PRIVATE path/to/SM3D_GPU_CC10/SM2D)
-```
+### Required compile defines (manual linking only)
 
-### Required defines
-
-When linking a prebuilt `.lib`, you must replicate the defines used during compilation:
+When **not** using `SRPLibraryConfig.cmake`, replicate the defines used during compilation:
 
 ```cmake
 # If the .lib was built with CUDA support:
