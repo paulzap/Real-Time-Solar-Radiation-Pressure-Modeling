@@ -43,10 +43,11 @@ endif()
 # Try vcpkg/system first; if not found, download automatically.
 # ---------------------------------------------------------------------------
 find_package(HighFive CONFIG QUIET)
-# Check the target, not just the found flag — some system-installed HighFive packages
-# set HighFive_FOUND=TRUE but don't export the HighFive::HighFive target properly.
+# Check the target directly — HighFive_FOUND=TRUE is not enough; some system
+# packages don't export HighFive::HighFive, and some Ubuntu setups cause
+# HighFive's internal find_package(HDF5) to fail silently, leaving no target.
 if(NOT TARGET HighFive::HighFive)
-    message(STATUS "SM3D: HighFive::HighFive target not found, fetching from GitHub...")
+    message(STATUS "SM3D: HighFive not found locally, fetching from GitHub...")
     include(FetchContent)
     FetchContent_Declare(HighFive
         GIT_REPOSITORY https://github.com/BlueBrain/HighFive.git
@@ -57,6 +58,19 @@ if(NOT TARGET HighFive::HighFive)
     set(HIGHFIVE_UNIT_TESTS   OFF CACHE BOOL "" FORCE)
     set(HIGHFIVE_EXAMPLES     OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(HighFive)
+
+    # Fallback: if HighFive's own CMakeLists.txt still didn't create the target
+    # (happens on Ubuntu when its internal HDF5 detection uses non-standard paths),
+    # create a minimal interface target directly from the downloaded headers.
+    # HighFive is header-only — we only need its include/ directory + HDF5.
+    if(NOT TARGET HighFive::HighFive)
+        FetchContent_GetProperties(HighFive SOURCE_DIR _hf_src)
+        message(STATUS "SM3D: Creating HighFive target manually from ${_hf_src}")
+        add_library(_sm3d_HighFive INTERFACE)
+        add_library(HighFive::HighFive ALIAS _sm3d_HighFive)
+        target_include_directories(_sm3d_HighFive INTERFACE "${_hf_src}/include")
+        target_link_libraries(_sm3d_HighFive INTERFACE ${_SM3D_HDF5_TARGET})
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
