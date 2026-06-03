@@ -559,8 +559,18 @@ foreach(_hint
   endif()
 endforeach()
 
-# HDF5 (always required)
-find_package(HDF5 REQUIRED COMPONENTS C)
+# HDF5 - try CONFIG mode first (vcpkg hdf5-config pulls in zlib + szip automatically)
+find_package(HDF5 CONFIG QUIET)
+if(HDF5_FOUND AND TARGET hdf5::hdf5)
+    set(_SRP_HDF5_TARGET "hdf5::hdf5")
+elseif(HDF5_FOUND AND TARGET HDF5::HDF5)
+    set(_SRP_HDF5_TARGET "HDF5::HDF5")
+else()
+    find_package(HDF5 REQUIRED COMPONENTS C)
+    set(_SRP_HDF5_TARGET "HDF5::HDF5")
+    find_package(ZLIB QUIET)
+    find_package(libaec QUIET CONFIG)
+endif()
 
 # Python (required if the library was built with visualization support)
 if(EXISTS "`${_SRP_DIR}/python/visualize3d.py")
@@ -573,8 +583,17 @@ if(NOT TARGET SRPLibrary::srp)
     set_target_properties(SRPLibrary::srp PROPERTIES
         IMPORTED_LOCATION             "`${_SRP_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "`${_SRP_DIR}/include"
-        INTERFACE_LINK_LIBRARIES      "HDF5::HDF5"
     )
+    set_property(TARGET SRPLibrary::srp APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES "`${_SRP_HDF5_TARGET}")
+    if(ZLIB_FOUND AND NOT TARGET hdf5::hdf5)
+        set_property(TARGET SRPLibrary::srp APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES ZLIB::ZLIB)
+    endif()
+    if(libaec_FOUND AND NOT TARGET hdf5::hdf5)
+        set_property(TARGET SRPLibrary::srp APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES libaec::sz)
+    endif()
     if(Python3_FOUND AND EXISTS "`${_SRP_DIR}/python/visualize3d.py")
         set_property(TARGET SRPLibrary::srp APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES Python3::Python)
