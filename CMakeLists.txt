@@ -4,18 +4,58 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------------------------------------------------------------------------
-# Build options — all default ON, disabled automatically if tools not found
+# Build options
 # ---------------------------------------------------------------------------
-option(SM3D_ENABLE_CUDA   "Enable CUDA acceleration"           ON)
-option(SM3D_ENABLE_OPTIX  "Enable OptiX RT-Core methods"       ON)
-option(SM3D_ENABLE_PYTHON "Enable Python visualisation"        ON)
-option(SM3D_BUILD_DEMO    "Build demo executable (main.cpp)"   ON)
+option(SM3D_ENABLE_CUDA   "Enable CUDA acceleration"         ON)
+option(SM3D_ENABLE_OPTIX  "Enable OptiX RT-Core methods"     ON)
+option(SM3D_ENABLE_PYTHON "Enable Python visualisation"      ON)
+
+# Demo defaults ON only when this is the top-level project.
+# When used via add_subdirectory / FetchContent it defaults OFF so it
+# does not pollute the parent build.
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    option(SM3D_BUILD_DEMO "Build demo executable (main.cpp)" ON)
+else()
+    option(SM3D_BUILD_DEMO "Build demo executable (main.cpp)" OFF)
+endif()
 
 # ---------------------------------------------------------------------------
-# Required dependencies (always needed)
+# HDF5 — try CONFIG mode first (vcpkg exports hdf5::hdf5 with all
+# transitive deps: zlib, szip/libaec). Fall back to module mode for
+# system-installed HDF5 (apt/brew).
 # ---------------------------------------------------------------------------
-find_package(HDF5 REQUIRED)
-find_package(HighFive REQUIRED CONFIG)
+find_package(HDF5 CONFIG QUIET)
+if(HDF5_FOUND AND (TARGET hdf5::hdf5 OR TARGET HDF5::HDF5))
+    message(STATUS "SM3D: HDF5 found via CONFIG mode")
+    if(TARGET hdf5::hdf5)
+        set(_SM3D_HDF5_TARGET hdf5::hdf5)
+    else()
+        set(_SM3D_HDF5_TARGET HDF5::HDF5)
+    endif()
+else()
+    find_package(HDF5 REQUIRED COMPONENTS C)
+    message(STATUS "SM3D: HDF5 found via module mode")
+    set(_SM3D_HDF5_TARGET HDF5::HDF5)
+endif()
+
+# ---------------------------------------------------------------------------
+# HighFive — header-only C++ wrapper around HDF5.
+# Try vcpkg/system first; if not found, download automatically.
+# ---------------------------------------------------------------------------
+find_package(HighFive CONFIG QUIET)
+if(NOT HighFive_FOUND)
+    message(STATUS "SM3D: HighFive not found locally, fetching from GitHub...")
+    include(FetchContent)
+    FetchContent_Declare(HighFive
+        GIT_REPOSITORY https://github.com/BlueBrain/HighFive.git
+        GIT_TAG        v2.9.0
+        GIT_SHALLOW    TRUE)
+    set(HIGHFIVE_USE_BOOST    OFF CACHE BOOL "" FORCE)
+    set(HIGHFIVE_BUILD_DOCS   OFF CACHE BOOL "" FORCE)
+    set(HIGHFIVE_UNIT_TESTS   OFF CACHE BOOL "" FORCE)
+    set(HIGHFIVE_EXAMPLES     OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(HighFive)
+endif()
 
 # ---------------------------------------------------------------------------
 # CUDA
@@ -27,7 +67,7 @@ if(SM3D_ENABLE_CUDA)
         set(SM3D_HAS_CUDA TRUE)
         message(STATUS "SM3D: CUDA ${CUDAToolkit_VERSION} found — CentroidGPU/PixelGridGPU enabled")
     else()
-        message(STATUS "SM3D: CUDA not found — GPU methods disabled, CPU-only build")
+        message(STATUS "SM3D: CUDA not found — CPU-only build")
     endif()
 else()
     message(STATUS "SM3D: CUDA disabled by SM3D_ENABLE_CUDA=OFF")
@@ -39,29 +79,26 @@ endif()
 if(SM3D_HAS_CUDA AND SM3D_ENABLE_OPTIX)
     find_path(OPTIX_INCLUDE_DIR optix.h
         PATHS
-            # env var override (cross-platform): set OPTIX_INSTALL_DIR=/path/to/optix
             "$ENV{OPTIX_INSTALL_DIR}/include"
-            # Windows default install paths
             "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.1.0/include"
             "C:/ProgramData/NVIDIA Corporation/OptiX SDK 9.0.0/include"
             "C:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/include"
-            # Linux default install paths
             "/opt/optix/include"
             "/usr/local/optix/include"
             "$ENV{HOME}/optix/include"
     )
     if(OPTIX_INCLUDE_DIR)
         set(SM3D_HAS_OPTIX TRUE)
-        message(STATUS "SM3D: OptiX found at ${OPTIX_INCLUDE_DIR} — RTX methods enabled")
+        message(STATUS "SM3D: OptiX found — RTX methods enabled")
     else()
-        message(STATUS "SM3D: OptiX not found — RTX methods disabled. Set OPTIX_INSTALL_DIR env var or install OptiX SDK.")
+        message(STATUS "SM3D: OptiX not found — RTX methods disabled (set OPTIX_INSTALL_DIR)")
     endif()
 elseif(SM3D_ENABLE_OPTIX AND NOT SM3D_HAS_CUDA)
     message(STATUS "SM3D: OptiX requires CUDA — RTX methods disabled")
 endif()
 
 # ---------------------------------------------------------------------------
-# Python / pybind11 (for visualiseLastResult only)
+# Python / pybind11
 # ---------------------------------------------------------------------------
 if(SM3D_ENABLE_PYTHON)
     find_package(pybind11 CONFIG QUIET)
@@ -69,7 +106,7 @@ if(SM3D_ENABLE_PYTHON)
         set(SM3D_HAS_PYTHON TRUE)
         message(STATUS "SM3D: pybind11 found — Python visualisation enabled")
     else()
-        message(STATUS "SM3D: pybind11 not found — visualiseLastResult() will print a warning at runtime")
+        message(STATUS "SM3D: pybind11 not found — visualizeLastResult() will warn at runtime")
     endif()
 endif()
 
@@ -100,7 +137,6 @@ set(OPTIX_SRC
     SM2D/gpu_optix_pixel_grid_raytracer_bench.cu
 )
 
-# OptiX PTX shaders — compiled to .ptx via custom commands, NOT linked into the .lib
 set(PTX_SRC
     SM2D/optix_shaders_center.cu
     SM2D/optix_shaders_center_bench.cu
@@ -112,17 +148,15 @@ set(PTX_SRC
 # Library target
 # ---------------------------------------------------------------------------
 add_library(srp STATIC ${CPU_SRC})
-target_include_directories(srp PUBLIC SM2D)
+
+# Public include dir — works whether this is top-level or a subdirectory
+target_include_directories(srp PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SM2D>
+    $<INSTALL_INTERFACE:include>
+)
 
 # HDF5 + HighFive
-target_link_libraries(srp PUBLIC HighFive::HighFive)
-if(TARGET HDF5::HDF5)
-    target_link_libraries(srp PUBLIC HDF5::HDF5)
-else()
-    # Fallback for older HDF5 CMake modules
-    target_include_directories(srp PUBLIC ${HDF5_INCLUDE_DIRS})
-    target_link_libraries(srp PUBLIC ${HDF5_LIBRARIES})
-endif()
+target_link_libraries(srp PUBLIC HighFive::HighFive ${_SM3D_HDF5_TARGET})
 
 # CUDA
 if(SM3D_HAS_CUDA)
@@ -141,21 +175,18 @@ if(SM3D_HAS_OPTIX)
     target_compile_definitions(srp PUBLIC SM3D_HAS_OPTIX)
     target_include_directories(srp PRIVATE ${OPTIX_INCLUDE_DIR})
 
-    # Compile PTX shaders — output goes to build directory alongside the demo exe
     foreach(SRC IN LISTS PTX_SRC)
         get_filename_component(NAME ${SRC} NAME_WE)
-        set(PTX_OUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${NAME}.ptx")
-        if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
-            set(PTX_OUT "${CMAKE_BINARY_DIR}/${NAME}.ptx")
-        endif()
+        set(PTX_OUT "${CMAKE_BINARY_DIR}/${NAME}.ptx")
         add_custom_command(
             OUTPUT  "${PTX_OUT}"
             COMMAND "${CUDAToolkit_NVCC_EXECUTABLE}"
                     -ptx -arch=compute_75
                     "-I${OPTIX_INCLUDE_DIR}"
-                    "${CMAKE_SOURCE_DIR}/${SRC}"
+                    # Use CMAKE_CURRENT_SOURCE_DIR — correct when used as subdirectory
+                    "${CMAKE_CURRENT_SOURCE_DIR}/${SRC}"
                     -o "${PTX_OUT}"
-            DEPENDS "${CMAKE_SOURCE_DIR}/${SRC}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${SRC}"
             COMMENT "Compiling OptiX PTX: ${NAME}.ptx"
         )
         list(APPEND PTX_FILES "${PTX_OUT}")
@@ -176,7 +207,6 @@ endif()
 if(SM3D_BUILD_DEMO)
     add_executable(srp_demo SM2D/main.cpp)
     target_link_libraries(srp_demo PRIVATE srp)
-    # PTX files must be next to the exe — copy them to exe output dir
     if(SM3D_HAS_OPTIX)
         add_dependencies(srp_demo srp_ptx)
     endif()
@@ -186,18 +216,17 @@ endif()
 # Summary
 # ---------------------------------------------------------------------------
 message(STATUS "")
-message(STATUS "=== SM3D SRP Library build configuration ===")
+message(STATUS "=== SM3D SRP Library ===")
 message(STATUS "  CUDA   : ${SM3D_HAS_CUDA}")
 message(STATUS "  OptiX  : ${SM3D_HAS_OPTIX}")
 message(STATUS "  Python : ${SM3D_HAS_PYTHON}")
 message(STATUS "  Demo   : ${SM3D_BUILD_DEMO}")
-message(STATUS "  Available methods:")
-message(STATUS "    CentroidCPU  PixelGridCPU  (always)")
+message(STATUS "  Methods always available: CentroidCPU  PixelGridCPU")
 if(SM3D_HAS_CUDA)
-    message(STATUS "    CentroidGPU  PixelGridGPU  (CUDA)")
+    message(STATUS "  Methods with CUDA:        CentroidGPU  PixelGridGPU")
 endif()
 if(SM3D_HAS_OPTIX)
-    message(STATUS "    CentroidRTX  PixelGridRTX  (OptiX)")
+    message(STATUS "  Methods with OptiX:       CentroidRTX  PixelGridRTX")
 endif()
-message(STATUS "============================================")
+message(STATUS "========================")
 message(STATUS "")

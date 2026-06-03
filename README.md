@@ -129,15 +129,59 @@ Download and extract `.h5` files into `SM2D/data3d_hdf5_0.5/`
 
 ---
 
-## Build
+## Build & integrate
 
-Three build paths are available. Choose the one that matches your situation.
+Four paths — choose the one that matches your situation.
 
-### Option A — one-command script build (recommended for library users)
+---
 
-These scripts check and install all dependencies automatically, then build
-`srp.lib` / `libsrp.a` and copy the result to `dist/`.
-CUDA and OptiX are **optional** — the script enables only what is installed.
+### Option A — FetchContent (recommended, no pre-built binaries needed)
+
+The simplest way to use the library in a CMake project. CMake downloads and
+builds it automatically. No vcpkg, no prebuilt `.a` / `.lib` required — just
+HDF5 on your system.
+
+**Linux (Ubuntu / Debian):**
+```bash
+sudo apt install libhdf5-dev python3-dev   # only HDF5 and Python needed
+```
+
+**Your `CMakeLists.txt`:**
+```cmake
+cmake_minimum_required(VERSION 3.23)
+project(my_project LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+
+include(FetchContent)
+FetchContent_Declare(SRP
+    GIT_REPOSITORY https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling.git
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE)
+# GPU methods are auto-disabled when CUDA / OptiX are not installed.
+# Force CPU-only explicitly if you prefer:
+# set(SM3D_ENABLE_CUDA OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(SRP)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE srp)
+```
+
+**Configure and build:**
+```bash
+cmake -B build
+cmake --build build
+```
+
+No extra flags needed. HighFive is fetched automatically if not found locally.
+On a machine with CUDA + OptiX, all 6 methods are compiled in automatically.
+
+---
+
+### Option B — one-command script (builds prebuilt `dist/` folder)
+
+The scripts check and install all dependencies automatically, then build
+`srp.lib` / `libsrp.a` and copy it to `dist/` together with a
+`SRPLibraryConfig.cmake` that handles all transitive dependencies.
 
 **Windows (PowerShell):**
 ```powershell
@@ -146,72 +190,46 @@ CUDA and OptiX are **optional** — the script enables only what is installed.
 
 **Linux / macOS (bash):**
 ```bash
-chmod +x setup.sh
-./setup.sh
+chmod +x setup.sh && ./setup.sh
 ```
 
-After the script finishes, the ready-to-use files are in `dist/`:
-
-```
-dist/
-├── include/SRPLibrary.h   ← only header you need
-├── lib/srp.lib            ← static library  (libsrp.a on Linux)
-└── bin/hdf5.dll           ← runtime DLL (Windows); *.ptx for OptiX methods
-```
-
-Link in your CMake project:
+**Your `CMakeLists.txt`:**
 ```cmake
-target_include_directories(my_app PRIVATE path/to/dist/include)
-target_link_libraries(my_app PRIVATE path/to/dist/lib/srp.lib)
+find_package(SRPLibrary REQUIRED CONFIG
+    HINTS "/path/to/dist")
+target_link_libraries(my_app PRIVATE SRPLibrary::srp)
 ```
 
-Override paths if dependencies are in non-default locations:
-```powershell
-.\setup.ps1 -Mode Library -OptixRoot "D:\SDK\OptiX 9.1.0" -VcpkgRoot "D:\tools\vcpkg"
-```
-```bash
-./setup.sh --optix /opt/optix --vcpkg ~/vcpkg
-```
+Copy `dist/python/visualize3d.py` next to your executable for 3-D visualization.
 
 ---
 
-### Option B — Visual Studio development setup (Windows)
-
-Run `setup.ps1` (default VS mode) to generate `LocalPaths.props` and
-open the project in VS 2022:
+### Option C — Visual Studio development setup (Windows)
 
 ```powershell
-.\setup.ps1          # generates SM2D\LocalPaths.props, sets PYTHONHOME
+.\setup.ps1          # generates SM2D\LocalPaths.props
 ```
 
-Then:
 1. Open `SM2D.sln` in Visual Studio 2022
-2. Select configuration: **Release | x64** ← **required**
+2. Select **Release | x64** ← **required**
 3. **Build → Rebuild Solution**
 
 > **Do NOT use Debug configuration for GPU kernels.** Debug CUDA builds exceed
-> SM register limits on complex kernels: `CUDA error 701`.
-
-```powershell
-cd x64\Release
-.\SM3D.exe ..\data3d_hdf5_0.5
-```
+> SM register limits: `CUDA error 701`.
 
 ---
 
-### Option C — CMake directly (any platform)
+### Option D — CMake directly (any platform)
 
 ```bash
-# CPU-only (no GPU required)
-cmake -B build -DSM3D_ENABLE_CUDA=OFF -DSM3D_ENABLE_OPTIX=OFF \
-      -DCMAKE_TOOLCHAIN_FILE=~/vcpkg/scripts/buildsystems/vcpkg.cmake
-cmake --build build --config Release
+# CPU-only, system HDF5
+cmake -B build -DSM3D_ENABLE_CUDA=OFF -DSM3D_ENABLE_OPTIX=OFF
+cmake --build build
 
-# Full build (CUDA + OptiX)
+# With vcpkg (GPU build)
 cmake -B build \
-      -DOPTIX_INSTALL_DIR=/opt/optix \
       -DCMAKE_TOOLCHAIN_FILE=~/vcpkg/scripts/buildsystems/vcpkg.cmake
-cmake --build build --config Release
+cmake --build build
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for a complete integration guide.
