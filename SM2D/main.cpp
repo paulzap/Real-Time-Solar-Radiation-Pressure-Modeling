@@ -11,7 +11,9 @@
 #include <string>
 #include <functional>
 #include <cmath>
-#include <nvml.h>
+#ifdef SM3D_HAS_CUDA
+#  include <nvml.h>
+#endif
 
 // Declared in SM3D_hw_info.cpp
 void        print_hardware_info();
@@ -24,6 +26,7 @@ namespace fs = std::filesystem;
 // =============================================================================
 // NVML GPU SM clock monitoring (§12)
 // =============================================================================
+#ifdef SM3D_HAS_CUDA
 namespace {
     struct NvmlContext {
         nvmlDevice_t device = nullptr;
@@ -47,6 +50,12 @@ namespace {
         return c < 0 ? "[GPU: N/A]" : "[GPU: " + std::to_string(c) + " MHz]";
     }
 }
+#else
+namespace {
+    // NVML not available in CPU-only builds; clock display silently returns empty.
+    inline std::string clock_tag() { return ""; }
+}
+#endif // SM3D_HAS_CUDA
 
 // Toggle: true = show SM clock at warm-up start/end and on each result line.
 // Default OFF so there is zero NVML overhead during normal timed sessions.
@@ -641,30 +650,38 @@ static void section10_srp_computation(SRPEngine& engine)
                                       << last.total_moment[2] << "] N*m\n\n";
     };
 
+#ifdef SM3D_HAS_OPTIX
     run_bench("CentroidRTX",
         [&](const auto& t, const auto& s) {
             return calculate_labels_ray_casting_rtx_bench(t, s, max_reflections);
         }, /*is_gpu=*/true);
+#endif // SM3D_HAS_OPTIX
 
+#ifdef SM3D_HAS_CUDA
     run_bench("CentroidGPU",
         [&](const auto& t, const auto& s) {
             return calculate_labels_reflections_gpu_bench(t, s, max_reflections, false);
         }, /*is_gpu=*/true);
+#endif // SM3D_HAS_CUDA
 
     run_bench("CentroidCPU",
         [&](const auto& t, const auto& s) {
             return calculate_labels_ray_casting_reflections(t, s, max_reflections, false);
         }, /*is_gpu=*/false);
 
+#ifdef SM3D_HAS_OPTIX
     run_bench("PixelGridRTX",
         [&](const auto& t, const auto& s) {
             return calculate_labels_pixel_grid_rtx_bench(t, s, grid_step, max_reflections, false);
         }, /*is_gpu=*/true);
+#endif // SM3D_HAS_OPTIX
 
+#ifdef SM3D_HAS_CUDA
     run_bench("PixelGridGPU",
         [&](const auto& t, const auto& s) {
             return calculate_labels_pixel_grid_gpu_bench(t, s, grid_step, max_reflections, false);
         }, /*is_gpu=*/true);
+#endif // SM3D_HAS_CUDA
 
     run_bench("PixelGridCPU",
         [&](const auto& t, const auto& s) {

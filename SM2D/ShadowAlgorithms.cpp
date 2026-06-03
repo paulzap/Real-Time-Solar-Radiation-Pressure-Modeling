@@ -6,11 +6,13 @@
 #include <vector>
 #include <array>
 #include <iostream>
-#include <pybind11/embed.h>
-#include <pybind11/stl.h>
+#ifdef SM3D_HAS_PYTHON
+#  include <pybind11/embed.h>
+#  include <pybind11/stl.h>
+   namespace py = pybind11;
+#endif
 #include <filesystem>
 
-namespace py = pybind11;
 namespace fs = std::filesystem;
 
 
@@ -96,6 +98,7 @@ SRPResult compute_srp_forces(
 
 void visualize_triangles(const std::string& csv_file, int every, bool show_normals,
     std::array<double, 3> force, std::array<double, 3> moment) {
+#ifdef SM3D_HAS_PYTHON
     try {
         py::module_ visualize = py::module_::import("visualize3d");
         visualize.attr("visualize_triangles")(csv_file, every, show_normals, force, moment);
@@ -104,6 +107,10 @@ void visualize_triangles(const std::string& csv_file, int every, bool show_norma
         std::cerr << "Python error: " << e.what() << "\n";
         throw;
     }
+#else
+    (void)csv_file; (void)every; (void)show_normals; (void)force; (void)moment;
+    std::cerr << "visualize_triangles() not available: built without Python support.\n";
+#endif
 }
 
 void save_results(const std::vector<Triangle>& triangles, const std::vector<int>& labels, const std::vector<int>& reference_labels, const std::string& filename, bool pixel_grid_mode) {
