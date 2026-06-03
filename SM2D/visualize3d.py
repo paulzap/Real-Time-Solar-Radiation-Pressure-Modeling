@@ -16,7 +16,7 @@ Color scheme:
   Yellow      (#FFD700) — illuminated  (Label = 1, direct sun)
   Dark orange (#FF8C00) — 1st-bounce reflection
   Orange-red  (#FF4500) — 2nd-bounce reflection
-  Orchid      (#DA70D6) — 3rd+ bounce reflection
+  Orange      (#FF8C00) — 3rd+ bounce reflection
   Gray        (#606060) — shadowed     (Label = 0)
   Red         (#E53935) — misclassified (Correct = 0)
 """
@@ -50,7 +50,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 _C_LIT    = '#FFD700'   # gold        — illuminated (direct sun)
 _C_REFL1  = '#d860e0'   # dark orange — hit by 1st-bounce reflection
 _C_REFL2  = '#4ade2c'   # orange-red  — hit by 2nd-bounce reflection
-_C_REFL3  = '#FFD700'   # orchid      — hit by 3rd+ bounce reflection
+_C_REFL3  = '#FF8C00'   # orange      — hit by 3rd+ bounce reflection
 _C_SHADOW = '#606060'   # gray        — shadowed / not reached by any light
 _C_WRONG  = '#E53935'   # red         — misclassified
 
