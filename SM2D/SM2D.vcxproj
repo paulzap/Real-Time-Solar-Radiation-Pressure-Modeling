@@ -69,7 +69,7 @@
   </PropertyGroup>
   <ImportGroup Label="ExtensionSettings">
     <!-- CUDA toolkit version: update the Import line below when upgrading CUDA.
-         Cannot use $(CudaVersion) here -- VS CUDA plugin requires a literal version string at load time.
+         Cannot use $(CudaVersion) here: VS CUDA plugin requires a literal version string at load time.
          setup.ps1 updates this line automatically. -->
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.4.props" />
   </ImportGroup>
