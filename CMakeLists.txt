@@ -43,8 +43,10 @@ endif()
 # Try vcpkg/system first; if not found, download automatically.
 # ---------------------------------------------------------------------------
 find_package(HighFive CONFIG QUIET)
-if(NOT HighFive_FOUND)
-    message(STATUS "SM3D: HighFive not found locally, fetching from GitHub...")
+# Check the target, not just the found flag — some system-installed HighFive packages
+# set HighFive_FOUND=TRUE but don't export the HighFive::HighFive target properly.
+if(NOT TARGET HighFive::HighFive)
+    message(STATUS "SM3D: HighFive::HighFive target not found, fetching from GitHub...")
     include(FetchContent)
     FetchContent_Declare(HighFive
         GIT_REPOSITORY https://github.com/BlueBrain/HighFive.git
