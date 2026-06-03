@@ -105,7 +105,8 @@ void visualize_triangles(const std::string& csv_file, int every, bool show_norma
     }
     catch (const py::error_already_set& e) {
         std::cerr << "Python error: " << e.what() << "\n";
-        throw;
+        std::cerr << "  Visualisation skipped.\n";
+        // Do not re-throw — a visualisation failure must not crash the program.
     }
 #else
     (void)csv_file; (void)every; (void)show_normals; (void)force; (void)moment;

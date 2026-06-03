@@ -215,6 +215,13 @@ endif()
 if(SM3D_HAS_PYTHON)
     target_compile_definitions(srp PUBLIC SM3D_HAS_PYTHON)
     target_link_libraries(srp PRIVATE pybind11::embed)
+    # Copy visualize3d.py to the binary dir so it can be found at runtime.
+    # When used via FetchContent the binary dir is the parent project's build root.
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/SM2D/visualize3d.py"
+        "${CMAKE_BINARY_DIR}/visualize3d.py"
+        COPYONLY
+    )
 endif()
 
 # ---------------------------------------------------------------------------
