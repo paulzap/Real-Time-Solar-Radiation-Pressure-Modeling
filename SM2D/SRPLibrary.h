@@ -292,6 +292,24 @@ private:
 //   * PixelGrid - parallel rays on a 2-D grid perpendicular to the sun
 //                 (accurate on small/grazing facets; cost scales with grid_step).
 //
+// =============================================================================
+// Hardware detection helpers (defined in SM3D_hw_info.cpp, linked into libsrp)
+// =============================================================================
+
+/// Returns true if at least one CUDA-capable GPU is present and functional.
+bool is_cuda_device_available();
+
+/// Returns true if at least one OptiX-capable (RT-Core) GPU is present.
+/// Requires SM_7.5+ (Turing / Ampere / Ada) and OptiX initialisation to succeed.
+bool is_rtx_device_available();
+
+/// Returns a human-readable explanation why RTX is unavailable, or "" if it is.
+std::string rtx_unavailable_reason();
+
+/// Prints a table of CUDA/OptiX device properties to stdout.
+void print_hardware_info();
+
+// =============================================================================
 // Each family has three backends:
 //   * CPU - portable, double precision, no GPU required.
 //   * GPU - CUDA cores, double precision accumulators (no OptiX required).

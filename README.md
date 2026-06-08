@@ -94,7 +94,7 @@ int main() {
 Hardware capabilities at runtime:
 
 ```cpp
-#include "SM3D_hw_info.cpp"  // declarations exposed through this TU
+#include "SRPLibrary.h"
 bool   has_cuda = is_cuda_device_available();
 bool   has_rtx  = is_rtx_device_available();
 std::string why = rtx_unavailable_reason();   // empty if RTX is usable
