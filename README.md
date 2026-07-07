@@ -286,4 +286,7 @@ MIT License — see [LICENSE](LICENSE).
 ## Citation
 
 If you use this code in your research, please cite the accompanying paper.
+
+Zapevalin, Pavel, Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores. Available at SSRN: https://ssrn.com/abstract=6879726 or http://dx.doi.org/10.2139/ssrn.6879726
+
 Citation details will be added upon publication.
