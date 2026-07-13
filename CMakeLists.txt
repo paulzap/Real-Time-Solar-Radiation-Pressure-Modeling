@@ -25,13 +25,17 @@ endif()
 # system-installed HDF5 (apt/brew).
 # ---------------------------------------------------------------------------
 find_package(HDF5 CONFIG QUIET)
-if(HDF5_FOUND AND (TARGET hdf5::hdf5 OR TARGET HDF5::HDF5))
-    message(STATUS "SM3D: HDF5 found via CONFIG mode")
-    if(TARGET hdf5::hdf5)
-        set(_SM3D_HDF5_TARGET hdf5::hdf5)
-    else()
-        set(_SM3D_HDF5_TARGET HDF5::HDF5)
+# vcpkg (>= 1.14) exports hdf5::hdf5-shared / hdf5::hdf5-static instead of a
+# plain hdf5::hdf5 target, so probe the known CONFIG-mode target names.
+set(_SM3D_HDF5_TARGET "")
+foreach(_hdf5_cand hdf5::hdf5 hdf5::hdf5-shared hdf5::hdf5-static HDF5::HDF5)
+    if(TARGET ${_hdf5_cand})
+        set(_SM3D_HDF5_TARGET ${_hdf5_cand})
+        break()
     endif()
+endforeach()
+if(_SM3D_HDF5_TARGET)
+    message(STATUS "SM3D: HDF5 found via CONFIG mode (${_SM3D_HDF5_TARGET})")
 else()
     find_package(HDF5 REQUIRED COMPONENTS C)
     message(STATUS "SM3D: HDF5 found via module mode")

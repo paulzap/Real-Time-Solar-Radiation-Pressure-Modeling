@@ -289,9 +289,9 @@ if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
 
     $vcpkgInc  = "$foundVcpkgRoot\installed\x64-windows\include"
     $vcpkgPkgs = @(
-        @{ name = "hdf5";     header = "$vcpkgInc\hdf5.h";               pkg = "hdf5:x64-windows"     },
-        @{ name = "highfive"; header = "$vcpkgInc\highfive\highfive.hpp"; pkg = "highfive:x64-windows" },
-        @{ name = "pybind11"; header = "$vcpkgInc\pybind11\embed.h";      pkg = "pybind11:x64-windows" }
+        @{ name = "hdf5";     header = "$vcpkgInc\hdf5.h";                pkg = "hdf5:x64-windows";     required = $true  },
+        @{ name = "highfive"; header = "$vcpkgInc\highfive\highfive.hpp"; pkg = "highfive:x64-windows"; required = $true  },
+        @{ name = "pybind11"; header = "$vcpkgInc\pybind11\embed.h";      pkg = "pybind11:x64-windows"; required = $false }
     )
 
     $missingPkgs = @()
@@ -314,6 +314,18 @@ if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
             $pkgList = ($missingPkgs | ForEach-Object { $_.pkg }) -join "  "
             Write-Info "Run manually: cd `"$foundVcpkgRoot`" ; .\vcpkg install $pkgList"
         }
+    }
+
+    # Verify the required packages actually landed. A failed vcpkg build must
+    # stop here with a clear message instead of letting CMake later die with a
+    # confusing "Could NOT find HDF5".
+    $stillMissing = @($vcpkgPkgs | Where-Object { $_.required -and -not (Test-Path $_.header) })
+    if ($stillMissing.Count -gt 0) {
+        $names = ($stillMissing | ForEach-Object { $_.name }) -join ', '
+        Write-Err "Required vcpkg package(s) not installed: $names"
+        Write-Info "Install them manually, watching for build errors, then re-run:"
+        Write-Info "  `"$foundVcpkgRoot\vcpkg.exe`" install hdf5:x64-windows highfive:x64-windows"
+        exit 1
     }
 } else {
     $foundVcpkgRoot = ""
@@ -672,13 +684,17 @@ foreach(_hint
   endif()
 endforeach()
 
-# HDF5 - try CONFIG mode first (vcpkg hdf5-config pulls in zlib + szip automatically)
+# HDF5 - try CONFIG mode first (vcpkg hdf5-config pulls in zlib + szip automatically).
+# vcpkg (>= 1.14) exports hdf5::hdf5-shared / hdf5::hdf5-static, not a plain hdf5::hdf5.
 find_package(HDF5 CONFIG QUIET)
-if(HDF5_FOUND AND TARGET hdf5::hdf5)
-    set(_SRP_HDF5_TARGET "hdf5::hdf5")
-elseif(HDF5_FOUND AND TARGET HDF5::HDF5)
-    set(_SRP_HDF5_TARGET "HDF5::HDF5")
-else()
+set(_SRP_HDF5_TARGET "")
+foreach(_srp_hdf5_cand hdf5::hdf5 hdf5::hdf5-shared hdf5::hdf5-static HDF5::HDF5)
+    if(TARGET `${_srp_hdf5_cand})
+        set(_SRP_HDF5_TARGET "`${_srp_hdf5_cand}")
+        break()
+    endif()
+endforeach()
+if(NOT _SRP_HDF5_TARGET)
     find_package(HDF5 REQUIRED COMPONENTS C)
     set(_SRP_HDF5_TARGET "HDF5::HDF5")
     find_package(ZLIB QUIET)
