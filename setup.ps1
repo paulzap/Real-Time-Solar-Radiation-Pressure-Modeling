@@ -19,6 +19,7 @@
     .\setup.ps1                   # VS mode: check + write LocalPaths.props
     .\setup.ps1 -Mode Library     # Library mode: check + build dist\srp.lib
     .\setup.ps1 -Mode Library -Force  # rebuild even if dist\ already exists
+    .\setup.ps1 -Auto             # Hands-off: auto-install vcpkg + deps, then build dist\
 
 .PARAMETER Mode
     "VS" (default) or "Library"
@@ -35,6 +36,12 @@
 .PARAMETER Force
     VS: overwrite LocalPaths.props without prompting.
     Library: delete and recreate build_dist\ and dist\.
+
+.PARAMETER Auto
+    Hands-off Library build. Implies -Mode Library and answers all prompts "yes":
+    auto-installs vcpkg (into %USERPROFILE%\vcpkg) and the required vcpkg packages
+    if they are missing, auto-locates CMake from the Visual Studio installation,
+    then builds dist\. Intended for one-click use via build.bat.
 #>
 param(
     [ValidateSet("VS","Library")]
@@ -42,17 +49,101 @@ param(
     [string]$VcpkgRoot  = "",
     [string]$OptixRoot  = "",
     [string]$PythonRoot = "",
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Auto
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
+
+# -Auto: hands-off Library build (used by build.bat). Force Library mode and
+# suppress interactive prompts (all [Y/n] questions are answered "yes").
+if ($Auto) { $Mode = "Library" }
+[bool]$NonInteractive = $Auto
 
 function Write-OK   { param($msg) Write-Host "  [OK]  $msg" -ForegroundColor Green  }
 function Write-Warn { param($msg) Write-Host "  [!]   $msg" -ForegroundColor Yellow }
 function Write-Err  { param($msg) Write-Host "  [ERR] $msg" -ForegroundColor Red    }
 function Write-Info { param($msg) Write-Host "        $msg" -ForegroundColor Cyan   }
 function Write-Step { param($msg) Write-Host "`n==> $msg"   -ForegroundColor White  }
+
+# -------------------------------------------------------------------------
+# Auto-provisioning helpers (used by -Auto)
+# -------------------------------------------------------------------------
+function Install-VcpkgAuto {
+    # Clone (or download) + bootstrap vcpkg into %USERPROFILE%\vcpkg.
+    # Returns the vcpkg root on success, or "" on failure.
+    $target = Join-Path $env:USERPROFILE "vcpkg"
+    Write-Info "Auto-installing vcpkg into: $target"
+
+    if (-not (Test-Path (Join-Path $target "bootstrap-vcpkg.bat"))) {
+        $git = Get-Command git.exe -ErrorAction SilentlyContinue
+        if ($git) {
+            Write-Info "Cloning microsoft/vcpkg with git ..."
+            & git.exe clone --depth 1 https://github.com/microsoft/vcpkg.git "$target"
+            if ($LASTEXITCODE -ne 0) { Write-Err "git clone failed."; return "" }
+        } else {
+            Write-Info "git not found - downloading vcpkg as ZIP ..."
+            $zip       = Join-Path $env:TEMP "vcpkg-master.zip"
+            $extracted = Join-Path $env:TEMP "vcpkg-master"
+            try {
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-WebRequest -Uri "https://github.com/microsoft/vcpkg/archive/refs/heads/master.zip" -OutFile $zip -UseBasicParsing
+                if (Test-Path $extracted) { Remove-Item $extracted -Recurse -Force }
+                Expand-Archive -Path $zip -DestinationPath $env:TEMP -Force
+                if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+                Move-Item $extracted $target
+                Remove-Item $zip -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Err "Failed to download/extract vcpkg: $($_.Exception.Message)"
+                return ""
+            }
+        }
+    } else {
+        Write-Info "vcpkg folder already present - bootstrapping it."
+    }
+
+    $bootstrap = Join-Path $target "bootstrap-vcpkg.bat"
+    if (-not (Test-Path $bootstrap)) { Write-Err "bootstrap-vcpkg.bat not found in $target"; return "" }
+    Write-Info "Bootstrapping vcpkg (building vcpkg.exe, ~1-2 min) ..."
+    & $bootstrap -disableMetrics
+    if (Test-Path (Join-Path $target "vcpkg.exe")) {
+        Write-OK "vcpkg ready: $target"
+        return $target
+    }
+    Write-Err "vcpkg bootstrap did not produce vcpkg.exe."
+    return ""
+}
+
+function Get-CMakeInfo {
+    # Locate cmake.exe (PATH first, then the copy bundled with Visual Studio) and,
+    # when Visual Studio is found, the matching multi-config generator name.
+    # Returns @{ Exe = <path>; Generator = <name or ''> }.
+    $info = @{ Exe = ""; Generator = "" }
+
+    $onPath = Get-Command cmake.exe -ErrorAction SilentlyContinue
+    if ($onPath) { $info.Exe = $onPath.Source }
+
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsPath = & $vswhere -latest -products * -property installationPath    2>$null | Select-Object -First 1
+        $vsVer  = & $vswhere -latest -products * -property installationVersion 2>$null | Select-Object -First 1
+        if ($vsPath) {
+            if (-not $info.Exe) {
+                $bundled = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+                if (Test-Path $bundled) { $info.Exe = $bundled }
+            }
+            if ($vsVer -match '^(\d+)\.') {
+                switch ($Matches[1]) {
+                    "17" { $info.Generator = "Visual Studio 17 2022" }
+                    "16" { $info.Generator = "Visual Studio 16 2019" }
+                    "15" { $info.Generator = "Visual Studio 15 2017" }
+                }
+            }
+        }
+    }
+    return $info
+}
 
 $ScriptDir  = $PSScriptRoot
 $PropsFile  = Join-Path $ScriptDir "SM2D\LocalPaths.props"
@@ -188,6 +279,11 @@ if (-not $foundVcpkgRoot) {
     }
 }
 
+# -Auto: if vcpkg is still not found, install and bootstrap it automatically.
+if ($Auto -and -not ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe"))) {
+    $foundVcpkgRoot = Install-VcpkgAuto
+}
+
 if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
     Write-OK "vcpkg  ->  $foundVcpkgRoot"
 
@@ -205,7 +301,7 @@ if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
     }
 
     if ($missingPkgs.Count -gt 0) {
-        $ans = Read-Host "`n  Install missing vcpkg packages now? [Y/n]"
+        if ($NonInteractive) { $ans = "Y" } else { $ans = Read-Host "`n  Install missing vcpkg packages now? [Y/n]" }
         if ($ans -notmatch '^[Nn]') {
             foreach ($p in $missingPkgs) {
                 Write-Info "Installing $($p.pkg) ..."
@@ -216,7 +312,7 @@ if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
             & "$foundVcpkgRoot\vcpkg.exe" integrate install
         } else {
             $pkgList = ($missingPkgs | ForEach-Object { $_.pkg }) -join "  "
-            Write-Info "Run manually: cd `"$foundVcpkgRoot`" && .\vcpkg install $pkgList"
+            Write-Info "Run manually: cd `"$foundVcpkgRoot`" ; .\vcpkg install $pkgList"
         }
     }
 } else {
@@ -224,7 +320,7 @@ if ($foundVcpkgRoot -and (Test-Path "$foundVcpkgRoot\vcpkg.exe")) {
     Write-Err "vcpkg not found."
     Write-Info "Install vcpkg:"
     Write-Info "  git clone https://github.com/microsoft/vcpkg `"$env:USERPROFILE\vcpkg`""
-    Write-Info "  cd `"$env:USERPROFILE\vcpkg`" && .\bootstrap-vcpkg.bat"
+    Write-Info "  cd `"$env:USERPROFILE\vcpkg`" ; .\bootstrap-vcpkg.bat"
     Write-Info "  .\vcpkg install hdf5:x64-windows highfive:x64-windows pybind11:x64-windows"
     Write-Info "  .\vcpkg integrate install"
 }
@@ -317,7 +413,7 @@ if ($pythonExe -and (Test-Path $pythonExe)) {
     }
 
     if ($missingPyPkgs.Count -gt 0) {
-        $ans = Read-Host "`n  Install missing packages via pip now? [Y/n]"
+        if ($NonInteractive) { $ans = "Y" } else { $ans = Read-Host "`n  Install missing packages via pip now? [Y/n]" }
         if ($ans -notmatch '^[Nn]') {
             foreach ($pkg in $missingPyPkgs) {
                 & $pythonExe -m pip install $pkg --quiet
@@ -480,13 +576,28 @@ if (-not $foundPythonRoot) {
     $cmakeArgs += "-DSM3D_ENABLE_PYTHON=OFF"
 }
 
+# Locate CMake (PATH, or the copy bundled with Visual Studio) and, when VS is
+# present, pick the matching generator so MSVC is configured automatically.
+$cmakeInfo = Get-CMakeInfo
+if (-not $cmakeInfo.Exe) {
+    Write-Err "CMake not found."
+    Write-Info "Install CMake (https://cmake.org/download/) or add the"
+    Write-Info "'C++ CMake tools for Windows' component via the Visual Studio Installer."
+    exit 1
+}
+$cmakeExe = $cmakeInfo.Exe
+Write-OK "CMake  ->  $cmakeExe"
+if ($cmakeInfo.Generator) {
+    $cmakeArgs = @("-G", $cmakeInfo.Generator, "-A", "x64") + $cmakeArgs
+}
+
 Write-Info "cmake $($cmakeArgs -join ' ')"
-& cmake @cmakeArgs
+& $cmakeExe @cmakeArgs
 if ($LASTEXITCODE -ne 0) { Write-Err "cmake configure failed."; exit 1 }
 
 # ---- cmake build ----
 Write-Step "Compiling (Release)..."
-& cmake --build $buildDir --config Release
+& $cmakeExe --build $buildDir --config Release
 if ($LASTEXITCODE -ne 0) { Write-Err "cmake build failed."; exit 1 }
 
 # ---- copy to dist\ ----
