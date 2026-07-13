@@ -1,7 +1,7 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    SM3D SRP Library — environment setup
+    SM3D SRP Library - environment setup
 
 .DESCRIPTION
     VS mode (default):
@@ -11,7 +11,7 @@
 
     Library mode  (-Mode Library):
         Same scan, then runs CMake and builds srp.lib into dist\.
-        CUDA / OptiX / Python are OPTIONAL — missing tools reduce
+        CUDA / OptiX / Python are OPTIONAL - missing tools reduce
         available methods but do not stop the build.
         Only HDF5 + HighFive (via vcpkg) are required.
 
@@ -102,7 +102,7 @@ if ($cudaPath) {
     Write-OK "CUDA $cudaVersion  ->  $cudaPath"
 } else {
     if ($Mode -eq "VS") { Write-Err  "CUDA Toolkit not found." }
-    else                { Write-Warn "CUDA Toolkit not found — GPU/RTX methods will be disabled." }
+    else                { Write-Warn "CUDA Toolkit not found - GPU/RTX methods will be disabled." }
     Write-Info "Install from: https://developer.nvidia.com/cuda-downloads"
 }
 
@@ -167,7 +167,7 @@ if ($foundOptixRoot -and (Test-Path "$foundOptixRoot\include\optix.h")) {
 } else {
     $foundOptixRoot = ""
     if ($Mode -eq "VS") { Write-Err  "OptiX SDK not found." }
-    else                { Write-Warn "OptiX SDK not found — RTX methods will be disabled." }
+    else                { Write-Warn "OptiX SDK not found - RTX methods will be disabled." }
     Write-Info "Download: https://developer.nvidia.com/designworks/optix/downloads/legacy"
     Write-Info "Or: .\setup.ps1 -OptixRoot ""C:\path\to\OptiX SDK X.Y.Z"""
 }
@@ -300,7 +300,7 @@ if ($foundPythonRoot -and (Test-Path "$foundPythonRoot\include\Python.h")) {
 } else {
     $foundPythonRoot = ""; $pythonExe = ""; $pythonLib = ""
     if ($Mode -eq "VS") { Write-Err  "Python not found (need include\Python.h)." }
-    else                { Write-Warn "Python not found — visualizeLastResult() will be unavailable." }
+    else                { Write-Warn "Python not found - visualizeLastResult() will be unavailable." }
     Write-Info "Install Python 3.10+ from: https://www.python.org/downloads/"
 }
 
@@ -327,7 +327,7 @@ if ($pythonExe -and (Test-Path $pythonExe)) {
         }
     }
 } else {
-    Write-Warn "Python not found — package check skipped."
+    Write-Warn "Python not found - package check skipped."
 }
 
 # -------------------------------------------------------------------------
@@ -352,7 +352,7 @@ function Show-Status {
         Write-Host ("  {0,-16} NOT FOUND  <--" -f $label) -ForegroundColor Red
         $script:allOk = $false
     } else {
-        Write-Host ("  {0,-16} not found  (optional — some methods disabled)" -f $label) -ForegroundColor Yellow
+        Write-Host ("  {0,-16} not found  (optional - some methods disabled)" -f $label) -ForegroundColor Yellow
     }
 }
 
@@ -363,7 +363,7 @@ Show-Status "vcpkg"     $foundVcpkgRoot  -required $true    # always required
 Show-Status "Python"    $foundPythonRoot -required $false   # optional in Library mode
 Show-Status "PythonLib" $pythonLib       -required $false
 
-# Set PYTHONHOME (both modes — needed for embedded Python at runtime)
+# Set PYTHONHOME (both modes - needed for embedded Python at runtime)
 if ($foundPythonRoot) {
     $currentPH = [System.Environment]::GetEnvironmentVariable("PYTHONHOME", "User")
     if ($currentPH -ne $foundPythonRoot) {
@@ -377,14 +377,14 @@ if ($foundPythonRoot) {
 
 if (-not $allOk) {
     Write-Host ""
-    Write-Err "Required dependencies are missing — see above."
+    Write-Err "Required dependencies are missing - see above."
     Write-Info "Fix the issues and run setup.ps1 again."
     Write-Info "Override paths: .\setup.ps1 -VcpkgRoot C:\path -OptixRoot C:\path -PythonRoot C:\path"
     exit 1
 }
 
 # =========================================================================
-# VS MODE — generate LocalPaths.props + patch SM2D.vcxproj
+# VS MODE - generate LocalPaths.props + patch SM2D.vcxproj
 # =========================================================================
 if ($Mode -eq "VS") {
 
@@ -432,7 +432,7 @@ if ($Mode -eq "VS") {
             Write-OK "Updated SM2D.vcxproj: CUDA $currentVer -> CUDA $cudaVersion"
             Write-Warn "Close and reopen the .sln in Visual Studio."
         } else {
-            Write-Warn "Could not detect CUDA version in SM2D.vcxproj — update manually."
+            Write-Warn "Could not detect CUDA version in SM2D.vcxproj - update manually."
         }
     } else {
         Write-Warn "SM2D.vcxproj not found."
@@ -446,7 +446,7 @@ if ($Mode -eq "VS") {
 }
 
 # =========================================================================
-# LIBRARY MODE — cmake + build + copy to dist\
+# LIBRARY MODE - cmake + build + copy to dist\
 # =========================================================================
 
 Write-Step "Building srp.lib with CMake"
@@ -510,7 +510,7 @@ if ($libSrc) {
     Copy-Item $libSrc (Join-Path $distDir "lib\srp.lib") -Force
     Write-OK "dist\lib\srp.lib"
 } else {
-    Write-Err "srp.lib not found in build_dist — build may have failed."
+    Write-Err "srp.lib not found in build_dist - build may have failed."
 }
 
 # OptiX PTX shaders

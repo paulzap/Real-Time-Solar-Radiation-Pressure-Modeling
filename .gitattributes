@@ -1,0 +1,6 @@
+# Keep line endings correct per-platform so scripts parse everywhere.
+# Windows PowerShell 5.1 wants CRLF; Linux shells want LF.
+*.ps1  text eol=crlf
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
