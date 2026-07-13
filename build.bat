@@ -12,6 +12,10 @@ REM  Requirements: Visual Studio (Desktop C++ workload) + internet access.
 REM  The FIRST run can take 15-30 minutes because vcpkg builds HDF5 from source.
 REM ===========================================================================
 setlocal
+REM Run from this script's own folder (matters if launched elevated: an admin
+REM cmd starts in C:\Windows\System32, which is not the project directory).
+cd /d "%~dp0"
+
 echo ============================================================
 echo   SM3D SRP Library - one-click build
 echo   First run may take 15-30 minutes (building HDF5 via vcpkg).

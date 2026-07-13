@@ -556,7 +556,9 @@ if ($Force) {
 }
 
 # ---- cmake configure ----
-$cmakeArgs = @("-B", $buildDir)
+# -S is explicit so the build works no matter what the current directory is
+# (e.g. when launched via build.bat, whose CWD may be C:\Windows\System32).
+$cmakeArgs = @("-S", $ScriptDir, "-B", $buildDir)
 
 if ($foundVcpkgRoot) {
     $cmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$foundVcpkgRoot\scripts\buildsystems\vcpkg.cmake"
