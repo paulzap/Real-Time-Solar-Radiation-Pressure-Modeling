@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the article below."
+title: "Solar Radiation Pressure Library — GPU & RT-Cores"
+abstract: >-
+  GPU- and RT-core-accelerated computation of solar radiation pressure force and
+  moment on articulated spacecraft geometry, with self-shadowing, multiple
+  specular reflections and per-facet optical properties.
+type: software
+authors:
+  - family-names: Zapevalin
+    given-names: P.R.
+    email: pav9981@yandex.ru
+license: MIT
+repository-code: "https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling"
+keywords:
+  - solar radiation pressure
+  - spacecraft
+  - self-shadowing
+  - ray tracing
+  - RT cores
+  - OptiX
+  - CUDA
+  - GPU
+preferred-citation:
+  type: article
+  title: "Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores"
+  authors:
+    - family-names: Zapevalin
+      given-names: P.R.
+  journal: "Aerospace Science and Technology"
+  year: 2026
+  start: 113714
+  issn: "1270-9638"
+  doi: "10.1016/j.ast.2026.113714"
+  url: "https://www.sciencedirect.com/science/article/pii/S1270963826020900"

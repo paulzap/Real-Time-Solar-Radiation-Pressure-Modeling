@@ -8,6 +8,7 @@
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows)](https://www.microsoft.com)
 [![Linux](https://img.shields.io/badge/Linux-Ubuntu%2020.04%2B-E95420?logo=ubuntu)](https://ubuntu.com)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022-5C2D91?logo=visualstudio)](https://visualstudio.microsoft.com/)
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.ast.2026.113714-blue)](https://doi.org/10.1016/j.ast.2026.113714)
 
 > Accurate, GPU-accelerated solar radiation pressure (SRP) force and moment
 > computation on articulated spacecraft geometry — six interchangeable
@@ -285,8 +286,23 @@ MIT License — see [LICENSE](LICENSE).
 
 ## Citation
 
-If you use this code in your research, please cite the accompanying paper.
+If you use this code in your research, please cite the accompanying paper:
 
-Zapevalin, Pavel, Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores. Available at SSRN: https://ssrn.com/abstract=6879726 or http://dx.doi.org/10.2139/ssrn.6879726
+> Zapevalin, P.R. Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores.
+> *Aerospace Science and Technology*, 2026, 113714.
+> https://doi.org/10.1016/j.ast.2026.113714
 
-Citation details will be added upon publication.
+```bibtex
+@article{ZAPEVALIN2026113714,
+  title   = {Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores},
+  author  = {P.R. Zapevalin},
+  journal = {Aerospace Science and Technology},
+  year    = {2026},
+  pages   = {113714},
+  issn    = {1270-9638},
+  doi     = {10.1016/j.ast.2026.113714},
+  url     = {https://www.sciencedirect.com/science/article/pii/S1270963826020900}
+}
+```
+
+The test geometry has its own DOI and should be cited separately — see [Dataset](#dataset).

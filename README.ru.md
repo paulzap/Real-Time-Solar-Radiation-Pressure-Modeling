@@ -2,6 +2,8 @@
 
 [English](README.md) · [Русский](README.ru.md)
 
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.ast.2026.113714-blue)](https://doi.org/10.1016/j.ast.2026.113714)
+
 Библиотека вычисления силы и момента солнечного давления (СД) на
 произвольной триангулированной геометрии космического аппарата.
 Шесть равноправных алгоритмов через единственный публичный
@@ -723,7 +725,25 @@ MIT License — см. файл [LICENSE](LICENSE).
 
 ## Цитирование
 
-Если вы используете этот код в научной работе, пожалуйста, укажите ссылку.
-Данные цитирования будут добавлены после публикации статьи.
+Если вы используете этот код в научной работе, пожалуйста, ссылайтесь на статью:
+
+> Zapevalin, P.R. Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores.
+> *Aerospace Science and Technology*, 2026, 113714.
+> https://doi.org/10.1016/j.ast.2026.113714
+
+```bibtex
+@article{ZAPEVALIN2026113714,
+  title   = {Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores},
+  author  = {P.R. Zapevalin},
+  journal = {Aerospace Science and Technology},
+  year    = {2026},
+  pages   = {113714},
+  issn    = {1270-9638},
+  doi     = {10.1016/j.ast.2026.113714},
+  url     = {https://www.sciencedirect.com/science/article/pii/S1270963826020900}
+}
+```
+
+У тестового датасета отдельный DOI, его следует цитировать отдельно — см. раздел [Датасет](#датасет).
 
 ---
