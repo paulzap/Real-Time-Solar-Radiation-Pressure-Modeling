@@ -1,7 +1,8 @@
 #pragma once
 
 // =============================================================================
-// SRPLibrary.h  -  single public header for the SM3D SRP computation library.
+// SRPLibrary.h  -  single public header of SolaRT, the solar radiation
+// pressure library for GPU RT cores (formerly the SM3D SRP library).
 //
 // The user only needs this one file.  All types used in the public API are
 // defined here directly; no additional headers need to be distributed.
@@ -32,6 +33,12 @@
 #include <filesystem>
 #include <limits>
 #include <cstdint>
+
+// Library version (see CHANGELOG.md).
+#define SOLART_VERSION_MAJOR  1
+#define SOLART_VERSION_MINOR  1
+#define SOLART_VERSION_PATCH  0
+#define SOLART_VERSION_STRING "1.1.0"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

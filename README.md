@@ -1,4 +1,4 @@
-# Solar Radiation Pressure Library — GPU & RT-Cores
+# SolaRT — Solar Radiation Pressure on GPU RT-Cores
 
 [English](README.md) · [Русский](README.ru.md)
 
@@ -9,10 +9,27 @@
 [![Linux](https://img.shields.io/badge/Linux-Ubuntu%2020.04%2B-E95420?logo=ubuntu)](https://ubuntu.com)
 [![Visual Studio](https://img.shields.io/badge/Visual%20Studio-2022-5C2D91?logo=visualstudio)](https://visualstudio.microsoft.com/)
 [![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.ast.2026.113714-blue)](https://doi.org/10.1016/j.ast.2026.113714)
+[![Release](https://img.shields.io/github/v/release/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling)](https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling/releases)
 
 > Accurate, GPU-accelerated solar radiation pressure (SRP) force and moment
 > computation on articulated spacecraft geometry — six interchangeable
 > algorithms, one header.
+
+**SolaRT** stands for *Solar radiation pressure on RT cores*; the "RT" is meant
+three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
+
+### What's new in 1.1.0
+
+- **Articulation on the GPU is fixed.** In 1.0.0 the GPU and RTX methods kept
+  the geometry from their first call: a rotated solar panel was ignored without
+  any warning (CPU methods were correct). Every method now sees articulation.
+- **Moment about any point** (`setMomentReference`, `setMomentReferenceToCenterOfMass`)
+  and mass properties read from the HDF5 `/inertia` group.
+- **CMake build fixed** for use as a subproject (`add_subdirectory` / FetchContent).
+- Results for fixed (non-articulated) geometry and call times are unchanged.
+
+Full list: [CHANGELOG.md](CHANGELOG.md). Version 1.0.0 is the code that
+accompanies the article.
 
 ---
 

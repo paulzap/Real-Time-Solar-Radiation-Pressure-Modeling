@@ -1,4 +1,4 @@
-# Using the SRP Library
+# Using SolaRT (SRP Library)
 
 This guide covers building the library, integrating it into your project, and using the full API.
 

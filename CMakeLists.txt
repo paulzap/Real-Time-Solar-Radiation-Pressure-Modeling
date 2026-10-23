@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.23)
-project(SRPLibrary LANGUAGES CXX)
+# SolaRT - solar radiation pressure on GPU RT cores. The CMake project and
+# package keep the name SRPLibrary (find_package(SRPLibrary) in user builds).
+project(SRPLibrary VERSION 1.1.0
+        DESCRIPTION "SolaRT - solar radiation pressure on GPU RT cores"
+        LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
