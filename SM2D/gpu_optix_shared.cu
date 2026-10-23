@@ -243,6 +243,16 @@ void ensure_rtx_common(const std::vector<Triangle>& triangles)
 }
 
 // ---------------------------------------------------------------------------
+// invalidate_rtx_geometry  (public - see gpu_geometry_cache.h)
+// Frees the device geometry (GAS + per-triangle arrays); the next RTX call
+// rebuilds it from the current triangle list. The OptiX context is kept.
+// ---------------------------------------------------------------------------
+void invalidate_rtx_geometry()
+{
+    if (g_rtx_shared.valid) free_geometry_buffers();
+}
+
+// ---------------------------------------------------------------------------
 // is_optix_runtime_available  (public - callable from plain .cpp files)
 // ---------------------------------------------------------------------------
 bool is_optix_runtime_available()

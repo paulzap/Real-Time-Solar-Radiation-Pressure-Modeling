@@ -183,7 +183,11 @@ if(SM3D_HAS_CUDA)
     target_sources(srp PRIVATE ${CUDA_SRC})
     target_compile_definitions(srp PUBLIC SM3D_HAS_CUDA)
     target_link_libraries(srp PRIVATE CUDA::cudart CUDA::nvml)
-    set_target_properties(srp PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    # Whole-program CUDA compilation: no device code is shared between the .cu
+    # files, and relocatable device code would merge the per-file __constant__
+    # BVH arrays into one image at device-link time, exceeding the 64 KB
+    # constant-memory limit (nvlink: "too much global constant data").
+    set_target_properties(srp PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         set_target_properties(srp PROPERTIES CUDA_ARCHITECTURES "75;86;89")
     endif()
@@ -194,6 +198,8 @@ if(SM3D_HAS_OPTIX)
     target_sources(srp PRIVATE ${OPTIX_SRC})
     target_compile_definitions(srp PUBLIC SM3D_HAS_OPTIX)
     target_include_directories(srp PRIVATE ${OPTIX_INCLUDE_DIR})
+    # OptiX context setup uses the CUDA driver API (cuCtxGetCurrent).
+    target_link_libraries(srp PRIVATE CUDA::cuda_driver)
 
     foreach(SRC IN LISTS PTX_SRC)
         get_filename_component(NAME ${SRC} NAME_WE)

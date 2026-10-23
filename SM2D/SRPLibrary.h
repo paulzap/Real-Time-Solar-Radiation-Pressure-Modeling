@@ -31,6 +31,7 @@
 #include <iostream>
 #include <filesystem>
 #include <limits>
+#include <cstdint>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -73,10 +74,12 @@ struct SRPResult {
 
 // =============================================================================
 // Solar radiation pressure scale factor (phi0) [N/m²].
-// Default: 4.56e-6 N/m² (approximate value at 1 AU).
-// Set this before calling any compute method to get forces in SI units.
-// All SRP force/moment results are multiplied by this value.
-// Use 1.0 for dimensionless / normalised output.
+// Default: 1.0 - results are per unit pressure (force in m², moment in m³).
+// Set it to the solar pressure (about 4.56e-6 N/m² at 1 AU) before calling any
+// compute method to get forces in newtons. All SRP force/moment results are
+// multiplied by this value.
+// This is a single process-wide variable: in multi-threaded code leave it at
+// 1.0 and scale the returned force/moment by the pressure yourself.
 // =============================================================================
 extern double g_srp_phi0;
 
@@ -213,6 +216,23 @@ public:
     const std::map<std::string, JointConfig>& joints() const;
     void        articulate(const std::string& component_name, const JointConfig& jc);
 
+    // ---- Geometry version -----------------------------------------------
+    // Identifier of the current triangle set. It changes on every load(),
+    // reload(), articulate() and load_single_file(), and is unique across all
+    // SatelliteDataset objects in the process. SRPEngine compares it with the
+    // version currently held in GPU memory and re-uploads the geometry when
+    // they differ, so articulation is seen by every GPU/RTX method.
+    std::uint64_t geometryVersion() const;
+
+    // ---- Mass properties (optional "/inertia" group of the HDF5 file) ----
+    // Written by SatForm3D. The values describe the pose stored in the file;
+    // articulation does NOT update them. The accessors throw if the loaded
+    // file has no mass properties - check hasMassProperties() first.
+    bool                  hasMassProperties() const;
+    double                totalMass()        const;  // kg
+    std::array<double, 3> centerOfMass()     const;  // m, body frame
+    std::array<double, 9> inertiaTensor()    const;  // kg*m^2, about the centre of mass, row-major
+
     // ---- Display helpers ------------------------------------------------
     void printInfo(std::ostream& out = std::cout)       const;
     void printComponents(std::ostream& out = std::cout) const;
@@ -258,6 +278,18 @@ private:
 
     // Parsed scene graph (filled by load_h5_into_cache, consumed by rebuildTriangles).
     std::vector<CachedNode>            cached_nodes_;
+
+    // Changes on every rebuildTriangles(); see geometryVersion().
+    std::uint64_t                      geometry_version_ = 0;
+    // Set when a new file is read: the next rebuild must refresh the per-
+    // triangle optical properties and names even if the triangle count did
+    // not change (another file can have the same number of triangles).
+    bool                               immutable_dirty_ = true;
+
+    bool                               has_mass_ = false;
+    double                             mass_     = 0.0;
+    std::array<double, 3>              com_{};
+    std::array<double, 9>              inertia_{};
 
     void scanFolder(const std::string& folder_path);
 
@@ -426,6 +458,15 @@ public:
 
     // Sun direction - normalised automatically; can be called at any time.
     void setSunDirection(double x, double y, double z);
+
+    // Moment reference point in the body frame [m]. total_moment of every
+    // result is taken about this point:  M_ref = M_origin - r_ref x F.
+    // Default (0,0,0) is the body-frame origin (behaviour of earlier versions).
+    void                  setMomentReference(double x, double y, double z);
+    std::array<double, 3> getMomentReference() const;
+    // Use the centre of mass stored in the HDF5 file (pose as stored in the
+    // file). Throws if the loaded file has no mass properties.
+    void                  setMomentReferenceToCenterOfMass();
 
     // Run the chosen method using the current dataset geometry and sun direction.
     // Fast path: GPU/RTX branches use the lean "bench" kernels (no bounce tracking).

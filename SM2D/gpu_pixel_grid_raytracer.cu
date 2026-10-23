@@ -487,6 +487,10 @@ struct PGGPUCache {
 
 static PGGPUCache g_pg_cache;
 
+// Drop the device copy of the geometry: the next call rebuilds it from the
+// current triangle list (see gpu_geometry_cache.h).
+void invalidate_pg_gpu_cache() { g_pg_cache.valid = false; }
+
 // ---------------------------------------------------------------------------
 // Host function
 // ---------------------------------------------------------------------------

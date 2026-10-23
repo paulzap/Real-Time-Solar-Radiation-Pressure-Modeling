@@ -538,6 +538,10 @@ struct ReflGPUCache {
 
 static ReflGPUCache g_refl_cache;
 
+// Drop the device copy of the geometry: the next call rebuilds it from the
+// current triangle list (see gpu_geometry_cache.h).
+void invalidate_refl_gpu_cache() { g_refl_cache.valid = false; }
+
 
 SRPResult calculate_labels_ray_casting_reflections_gpu(
     const std::vector<Triangle>& triangles,

@@ -5,6 +5,7 @@
 #  include "gpu_optix_raytracer.h"
 #endif
 #include "bench_methods.h"
+#include "gpu_geometry_cache.h"
 #include <stdexcept>
 #include <cmath>
 #include <iostream>
@@ -16,6 +17,34 @@
 #endif
 
 // -----------------------------------------------------------------------------
+// GPU geometry synchronisation
+//
+// The GPU/RTX backends keep the triangle list in device memory between calls
+// and rebuild it by themselves only when the triangle count changes. Rotating
+// a panel (or loading another file with the same count) keeps the count, so
+// before every GPU/RTX call the engine compares the dataset's geometry version
+// with the version currently held on the GPU and drops the device copies when
+// they differ. The version is process-wide because the device copies are.
+// -----------------------------------------------------------------------------
+static std::uint64_t g_gpu_geometry_version = 0;   // 0 = nothing uploaded yet
+
+static bool method_uses_gpu(SRPMethod m) {
+    return m != SRPMethod::CentroidCPU && m != SRPMethod::PixelGridCPU;
+}
+
+static void invalidate_all_gpu_geometry() {
+#ifdef SM3D_HAS_CUDA
+    invalidate_refl_gpu_cache();
+    invalidate_refl_gpu_bench_cache();
+    invalidate_pg_gpu_cache();
+    invalidate_pg_gpu_bench_cache();
+#endif
+#ifdef SM3D_HAS_OPTIX
+    invalidate_rtx_geometry();
+#endif
+}
+
+// -----------------------------------------------------------------------------
 // Private implementation (PImpl)
 // -----------------------------------------------------------------------------
 struct SRPEngine::Impl {
@@ -23,6 +52,7 @@ struct SRPEngine::Impl {
     std::array<double, 3> sun_dir = { 0.0, 1.0, 0.0 };
     int    max_reflections = 0;          // bounces for all methods
     double grid_step       = 0.05;       // pixel-grid cell size [m] (PixelGrid* only)
+    std::array<double, 3> moment_ref = { 0.0, 0.0, 0.0 };   // body frame [m]
     SRPResult last_result;
 
     explicit Impl(const std::string& folder_path) : ds(folder_path) {
@@ -46,9 +76,31 @@ struct SRPEngine::Impl {
         grid_step = step;
     }
 
+    // Make the GPU copies of the geometry match the dataset (see above).
+    void sync_gpu_geometry(SRPMethod method) {
+        if (!method_uses_gpu(method)) return;
+        const std::uint64_t v = ds.geometryVersion();
+        if (v != g_gpu_geometry_version) {
+            invalidate_all_gpu_geometry();
+            g_gpu_geometry_version = v;
+        }
+    }
+
+    // Moment about the chosen reference point: M_ref = M_origin - r_ref x F.
+    // With the default reference (origin) the result is left untouched.
+    void apply_moment_reference(SRPResult& r) const {
+        const auto& c = moment_ref;
+        if (c[0] == 0.0 && c[1] == 0.0 && c[2] == 0.0) return;
+        const auto& F = r.total_force;
+        r.total_moment[0] -= c[1] * F[2] - c[2] * F[1];
+        r.total_moment[1] -= c[2] * F[0] - c[0] * F[2];
+        r.total_moment[2] -= c[0] * F[1] - c[1] * F[0];
+    }
+
     // Fast path: GPU/RTX branches use the lean "bench" kernels (no bounce tracking).
     // CPU branches always populate bounce globals internally (cheap on CPU).
     SRPResult compute(SRPMethod method) {
+        sync_gpu_geometry(method);
         const auto& triangles = ds.triangles();
         std::vector<double> sun_vec = { sun_dir[0], sun_dir[1], sun_dir[2] };
 
@@ -96,12 +148,14 @@ struct SRPEngine::Impl {
         default:
             throw std::runtime_error("Unknown SRP method");
         }
+        apply_moment_reference(last_result);
         return last_result;
     }
 
     // Visualization path: full bounce tracking (non-bench kernels).
     // After return, getBounceLevels() / getIncidentDirs() / getOriginPts() are valid.
     SRPResult computeViz(SRPMethod method) {
+        sync_gpu_geometry(method);
         const auto& triangles = ds.triangles();
         std::vector<double> sun_vec = { sun_dir[0], sun_dir[1], sun_dir[2] };
 
@@ -149,6 +203,7 @@ struct SRPEngine::Impl {
         default:
             throw std::runtime_error("Unknown SRP method");
         }
+        apply_moment_reference(last_result);
         return last_result;
     }
 
@@ -400,6 +455,14 @@ double SRPEngine::getGridStep() const      { return pImpl->grid_step; }
 
 void SRPEngine::setSunDirection(double x, double y, double z) {
     pImpl->setSunDirection(x, y, z);
+}
+
+void SRPEngine::setMomentReference(double x, double y, double z) {
+    pImpl->moment_ref = { x, y, z };
+}
+std::array<double, 3> SRPEngine::getMomentReference() const { return pImpl->moment_ref; }
+void SRPEngine::setMomentReferenceToCenterOfMass() {
+    pImpl->moment_ref = pImpl->ds.centerOfMass();   // throws if the file has no /inertia group
 }
 
 SRPResult SRPEngine::compute(SRPMethod method)    { return pImpl->compute(method); }

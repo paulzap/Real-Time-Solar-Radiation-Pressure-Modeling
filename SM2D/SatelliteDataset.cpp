@@ -8,15 +8,50 @@
 #include <ostream>
 #include <numeric>
 #include <sstream>
+#include <atomic>
 
 // HighFive for HDF5 reading
 #include <highfive/highfive.hpp>
+
+// =========================================================================
+// Geometry version counter - process-wide, so a version identifies one
+// triangle set across all SatelliteDataset objects (the GPU caches it is
+// compared against are process-wide too).
+// =========================================================================
+static std::uint64_t next_geometry_version() {
+    static std::atomic<std::uint64_t> counter{0};
+    return ++counter;
+}
 
 // =========================================================================
 // Construction
 // =========================================================================
 SatelliteDataset::SatelliteDataset(const std::string& folder_path) {
     scanFolder(folder_path);
+}
+
+// =========================================================================
+// Geometry version and mass properties
+// =========================================================================
+std::uint64_t SatelliteDataset::geometryVersion() const { return geometry_version_; }
+
+bool SatelliteDataset::hasMassProperties() const { return has_mass_; }
+
+static void require_mass(bool has, const std::string& file) {
+    if (!has)
+        throw std::runtime_error("No mass properties (/inertia group) in " + file);
+}
+double SatelliteDataset::totalMass() const {
+    require_mass(has_mass_, current_file_);
+    return mass_;
+}
+std::array<double, 3> SatelliteDataset::centerOfMass() const {
+    require_mass(has_mass_, current_file_);
+    return com_;
+}
+std::array<double, 9> SatelliteDataset::inertiaTensor() const {
+    require_mass(has_mass_, current_file_);
+    return inertia_;
 }
 
 // =========================================================================
@@ -436,6 +471,8 @@ static std::vector<double> readFlatVector(const HighFive::DataSet& ds) {
 void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
 {
     cached_nodes_.clear();
+    immutable_dirty_ = true;   // new file: optics/names must be refreshed on rebuild
+    has_mass_ = false;
 
     HighFive::File file(file_path, HighFive::File::ReadOnly);
 
@@ -443,7 +480,39 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
     if (objects.empty())
         throw std::runtime_error("HDF5 file has no root group: " + file_path);
 
-    auto root_group = file.getGroup(objects[0]);
+    // Optional mass properties written by SatForm3D (tensor is about the CoM).
+    if (file.exist("inertia")) {
+        try {
+            auto ig = file.getGroup("inertia");
+            std::vector<double> com;
+            std::vector<std::vector<double>> I;
+            ig.getAttribute("total_mass").read(mass_);
+            ig.getDataSet("center_of_mass").read(com);
+            ig.getDataSet("inertia_tensor").read(I);
+            if (com.size() != 3 || I.size() != 3 || I[0].size() != 3 ||
+                I[1].size() != 3 || I[2].size() != 3)
+                throw std::runtime_error("unexpected dataset shape");
+            for (int k = 0; k < 3; ++k) com_[k] = com[k];
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 3; ++c) inertia_[r * 3 + c] = I[r][c];
+            has_mass_ = true;
+        } catch (const std::exception& e) {
+            has_mass_ = false;
+            std::cerr << "SatelliteDataset: /inertia group in " << file_path
+                      << " ignored (" << e.what() << ")\n";
+        }
+    }
+
+    // The root is the first group that is not the mass-properties group.
+    std::string root_name;
+    for (const auto& name : objects)
+        if (name != "inertia" && name != "lumped_masses" && name != "provenance") {
+            root_name = name;
+            break;
+        }
+    if (root_name.empty())
+        throw std::runtime_error("HDF5 file has no geometry root group: " + file_path);
+    auto root_group = file.getGroup(root_name);
 
     std::function<void(const HighFive::Group&, int, const std::string&)> visit;
     visit = [&](const HighFive::Group& group, int parent_idx, const std::string& gname) {
@@ -485,7 +554,7 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         }
     };
 
-    visit(root_group, -1, objects[0]);
+    visit(root_group, -1, root_name);
 }
 
 // =========================================================================
@@ -504,20 +573,26 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
 void SatelliteDataset::rebuildTriangles(
         const std::map<std::string, JointConfig>& joint_overrides)
 {
-    if (cached_nodes_.empty()) { triangles_.clear(); return; }
+    if (cached_nodes_.empty()) {
+        triangles_.clear();
+        geometry_version_ = next_geometry_version();
+        return;
+    }
 
     // Pre-count total triangle count.
     size_t total_tris = 0;
     for (const auto& n : cached_nodes_) if (n.has_mesh) total_tris += n.tri_indices.size();
 
     // Detect first build vs subsequent articulation rebuild.
-    // On first build (or when the triangle count changes - different HDF5 file)
-    // we must populate the immutable per-triangle fields: ID, component_type,
-    // component_name, optical properties, area. On articulation rebuilds the
-    // immutable fields are already correct, so we only refresh geometry
-    // (vertices, normal, centroid). This avoids ~3*N std::string allocations
-    // per articulation - the dominant cost for a 750k-triangle mesh.
-    const bool first_build = (triangles_.size() != total_tris);
+    // On first build after reading a file (immutable_dirty_) or when the
+    // triangle count changes we must populate the immutable per-triangle
+    // fields: ID, component_type, component_name, optical properties, area.
+    // The count alone is not enough: another file may have the same number of
+    // triangles and different optics. On articulation rebuilds the immutable
+    // fields are already correct, so we only refresh geometry (vertices,
+    // normal, centroid). This avoids ~3*N std::string allocations per
+    // articulation - the dominant cost for a 750k-triangle mesh.
+    const bool first_build = immutable_dirty_ || (triangles_.size() != total_tris);
     triangles_.resize(total_tris);
 
     // T_body for each cached node; index aligns with cached_nodes_.
@@ -589,4 +664,7 @@ void SatelliteDataset::rebuildTriangles(
             ++write_idx;
         }
     }
+
+    immutable_dirty_  = false;
+    geometry_version_ = next_geometry_version();
 }

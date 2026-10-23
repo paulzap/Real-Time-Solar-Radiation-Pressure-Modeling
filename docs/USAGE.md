@@ -271,6 +271,12 @@ engine.setMaxReflections(2);
 engine.setGridStep(0.02);
 double step = engine.getGridStep();
 
+// Moment reference point, body frame [m] (default: body-frame origin).
+// total_moment of every result is taken about this point.
+engine.setMomentReference(0.40, -0.27, 0.70);
+engine.setMomentReferenceToCenterOfMass();   // CoM from the HDF5 /inertia group
+auto ref = engine.getMomentReference();
+
 // Run calculation
 SRPResult r = engine.compute(SRPMethod::CentroidRTX);   // fast (no bounce tracking)
 SRPResult r = engine.computeViz(SRPMethod::CentroidRTX); // slower (+ bounce tracking)
@@ -311,6 +317,15 @@ ds.reload();             // re-apply current joints without re-reading HDF5
 // Geometry access
 const std::vector<Triangle>& tris = ds.triangles();
 int ntri = ds.triangleCount();
+std::uint64_t ver = ds.geometryVersion();   // changes on every load/reload/articulate
+
+// Mass properties (only files with an /inertia group, e.g. SatForm3D output;
+// values are for the pose stored in the file, articulation does not update them)
+if (ds.hasMassProperties()) {
+    double m = ds.totalMass();                       // kg
+    std::array<double,3> com = ds.centerOfMass();    // m, body frame
+    std::array<double,9> I   = ds.inertiaTensor();   // kg*m^2 about the CoM, row-major
+}
 
 // Component inspection
 auto comp_names = ds.componentNames();       // {"Body", "SolarPanel_L", ...}
@@ -329,6 +344,11 @@ ds.reload();                                                   // commit staged 
 
 // Articulation — prismatic (translation)
 ds.articulate("Boom", JointConfig::translateZ(2.5));
+
+// Every method, including the GPU/RTX ones, uses the articulated geometry on
+// the next compute(): the engine compares ds.geometryVersion() with the
+// version held in GPU memory and re-uploads the geometry when it changed.
+// The re-upload (BVH build + copy to the GPU) is paid once per change.
 
 // Joint management
 ds.clearJoint("SolarPanel_L");
@@ -446,12 +466,16 @@ struct Triangle {
 ### Global scale factor
 
 ```cpp
-extern double g_srp_phi0;   // default: 4.56e-6 N/m² at 1 AU
+extern double g_srp_phi0;   // default: 1.0 (results per unit pressure: m², m³)
 
 // Override before any compute() call:
-g_srp_phi0 = 4.56e-6;   // SI (default)
-g_srp_phi0 = 1.0;        // dimensionless / normalised output
+g_srp_phi0 = 4.56e-6;   // SI: solar pressure at 1 AU, N/m²
+g_srp_phi0 = 1.0;        // dimensionless / normalised output (default)
 ```
+
+`g_srp_phi0` is one process-wide variable. In multi-threaded code, or when the
+pressure changes along the orbit, leave it at 1.0 and multiply the returned
+force and moment by the current pressure P = 4.56e-6 · (1 AU / r)² yourself.
 
 ---
 

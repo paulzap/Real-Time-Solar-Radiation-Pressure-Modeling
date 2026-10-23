@@ -472,6 +472,10 @@ struct ReflGPUCacheBench {
 
 static ReflGPUCacheBench g_refl_bench_cache;
 
+// Drop the device copy of the geometry: the next call rebuilds it from the
+// current triangle list (see gpu_geometry_cache.h).
+void invalidate_refl_gpu_bench_cache() { g_refl_bench_cache.valid = false; }
+
 static void refl_bench_free_refl_buffers(ReflGPUCacheBench& c)
 {
     auto cf = [](auto*& p){ if(p){ cudaFree(p); p=nullptr; } };

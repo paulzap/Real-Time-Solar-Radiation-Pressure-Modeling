@@ -390,6 +390,10 @@ struct PGGPUCacheBench {
 
 static PGGPUCacheBench g_pg_bench_cache;
 
+// Drop the device copy of the geometry: the next call rebuilds it from the
+// current triangle list (see gpu_geometry_cache.h).
+void invalidate_pg_gpu_bench_cache() { g_pg_bench_cache.valid = false; }
+
 // ---------------------------------------------------------------------------
 // calculate_labels_pixel_grid_gpu_bench
 // ---------------------------------------------------------------------------
