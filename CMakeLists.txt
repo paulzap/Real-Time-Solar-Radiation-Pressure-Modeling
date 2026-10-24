@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.23)
 # SolaRT - solar radiation pressure on GPU RT cores. The CMake project and
 # package keep the name SRPLibrary (find_package(SRPLibrary) in user builds).
-project(SRPLibrary VERSION 1.1.0
+project(SRPLibrary VERSION 1.2.0
         DESCRIPTION "SolaRT - solar radiation pressure on GPU RT cores"
         LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
@@ -147,6 +147,7 @@ set(CPU_SRC
 )
 
 set(CUDA_SRC
+    SM2D/gpu_instance_scene.cu
     SM2D/gpu_reflection_raytracer.cu
     SM2D/gpu_reflection_raytracer_bench.cu
     SM2D/gpu_pixel_grid_raytracer.cu

@@ -36,9 +36,9 @@
 
 // Library version (see CHANGELOG.md).
 #define SOLART_VERSION_MAJOR  1
-#define SOLART_VERSION_MINOR  1
+#define SOLART_VERSION_MINOR  2
 #define SOLART_VERSION_PATCH  0
-#define SOLART_VERSION_STRING "1.1.0"
+#define SOLART_VERSION_STRING "1.2.0"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -268,8 +268,10 @@ public:
     // SatelliteDataset objects in the process. SRPEngine compares it with the
     // version currently held in GPU memory and updates the geometry when
     // they differ, so articulation is seen by every GPU/RTX method.
-    // structureVersion() changes only when a file is read: the split into
-    // rigid parts is fixed by the file, joint values only move the parts.
+    // structureVersion() changes when a file is read and when a movable
+    // component leaves or returns to the pose stored in the file (it is a
+    // separate rigid part on the GPU exactly while it is out of that pose);
+    // other joint changes only move the parts.
     std::uint64_t geometryVersion()  const;
     std::uint64_t structureVersion() const;
 
@@ -364,6 +366,12 @@ private:
 
     SceneHolder                        scene_;
     mutable std::uint64_t              scene_pose_version_ = 0;
+    // A movable component is a separate rigid part exactly while its body
+    // transform differs from the pose stored in the file; otherwise it stays
+    // with the fixed body, so a model that is not articulated is computed by
+    // the single-structure path of 1.1.0.
+    std::vector<Mat4>                  file_pose_T_;   // T_body of every node, no joints
+    std::vector<char>                  part_active_;   // per node: separate part
 
     bool                               has_mass_ = false;
     double                             mass_     = 0.0;
@@ -397,8 +405,10 @@ private:
     // when the committed pose changed.
     void rebuildTriangles(const std::map<std::string, JointConfig>& joint_overrides) const;
 
-    // Commit joints: new pose version, triangles and GPU scene marked stale.
+    // Commit joints: new pose version, triangles marked stale; the movable
+    // components out of their file pose are the separate rigid parts.
     void commitJoints(const std::map<std::string, JointConfig>& joints);
+    void resetRigidParts();   // after a file read: every component with the body
 
     // Throws std::invalid_argument unless the loaded file declares a matching
     // movable joint for component_name (see setJoint).
@@ -501,6 +511,12 @@ public:
     //   engine.dataset().printInfo()
     //   engine.dataset().printComponents()
     //   engine.dataset().printJoints()
+    //
+    // Declared joints (the HDF5 file decides which components move):
+    //   engine.dataset().movableComponents()
+    //   engine.dataset().jointInfo("Name")      - type, axis, limits
+    //   engine.dataset().setJointValue("Name", value)
+    //                                           - declared joint, applied at once
     //
     // Articulate (revolute joints - rotation):
     //   engine.dataset().setJoint("Name", JointConfig::rotZ(angle_rad))

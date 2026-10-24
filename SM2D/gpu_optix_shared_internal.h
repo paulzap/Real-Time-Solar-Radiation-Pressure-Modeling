@@ -12,6 +12,8 @@
 #include <optix_stubs.h>
 #include <cuda_runtime.h>
 #include <vector>
+#include <array>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include "ShadowAlgorithms.h"
@@ -83,9 +85,33 @@ struct RTXSharedState {
     CUdeviceptr d_origin_pts    = 0;  // float [N*3], sentinel 0xFF = NaN
 
     size_t N = 0;
+
+    // Two-level mode (files with movable components, see instance_scene.h):
+    // one GAS per contiguous triangle range in its part frame, with
+    // primitiveIndexOffset = first global index, and an IAS over them;
+    // `bvh` then holds the IAS handle. A pose change rewrites the instance
+    // transforms and rebuilds the IAS only.
+    bool                                parts             = false;
+    std::uint64_t                       structure_version = 0;
+    std::uint64_t                       pose_version      = 0;
+    std::vector<CUdeviceptr>            d_gas_bufs;          // one per range
+    std::vector<OptixTraversableHandle> gas;
+    std::vector<unsigned int>           range_part;          // part of each range
+    std::vector<unsigned int>           range_first, range_count;
+    CUdeviceptr d_instances = 0;                             // OptixInstance [ranges]
+    CUdeviceptr d_ias_buf   = 0;
+    CUdeviceptr d_ias_temp  = 0;
+    size_t      ias_buf_size = 0, ias_temp_size = 0;
+    std::vector<std::array<double, 12>> applied;             // part transforms in the device data
 };
 
 extern RTXSharedState g_rtx_shared;
+
+class SatelliteDataset;
+// Two-level geometry for a file with movable components: builds the GASes once
+// per file, refreshes body-frame centroids / normals of the moved parts and the
+// IAS on every pose change. Pipelines must allow single-level instancing.
+void ensure_rtx_parts(const SatelliteDataset& ds);
 
 // ---------------------------------------------------------------------------
 // Declared in gpu_optix_shared.cu, called by both method files

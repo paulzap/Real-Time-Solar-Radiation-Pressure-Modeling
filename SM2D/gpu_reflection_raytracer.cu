@@ -972,3 +972,529 @@ SRPResult calculate_labels_ray_casting_reflections_gpu(
 
     return result;
 }
+
+// ===================== Two-level variant (rigid parts, SolaRT 1.2) =====================
+// Used when the file declares movable components (see gpu_instance_scene.h).
+// Vertices and BVH nodes are in the frame of each part; normals and centers
+// stay in the body frame, so label initialisation and first-bounce rays use
+// the kernels above unchanged. The shadow and reflection traversals move the
+// ray into each part in turn. Labels and bounce data keep the global
+// triangle numbering.
+
+#include "gpu_instance_scene.h"
+
+__constant__ ScenePartDev<float> d_rv_parts[SCENE_MAX_PARTS];
+
+__device__ static bool rvPartsShadowed(
+    const TriangleDevRefl* __restrict__ triangles,
+    const BVHNodeDevRefl* __restrict__ nodes,
+    const float* __restrict__ centers,
+    unsigned int i, const float origin[3], const float dir[3], int nparts)
+{
+    for (int p = 0; p < nparts; ++p) {
+        const ScenePartDev<float>& P = d_rv_parts[p];
+        float tbox;
+        if (!scene_ray_box(origin, dir, P.box, tbox)) continue;
+        float ol[3] = { origin[0], origin[1], origin[2] }, dl[3] = { dir[0], dir[1], dir[2] };
+        if (!P.identity) scene_ray_to_part(P, origin, dir, ol, dl);
+        unsigned int stack[128];
+        int sp = 0;
+        stack[sp++] = P.root;
+        while (sp > 0) {
+            const BVHNodeDevRefl& node = nodes[stack[--sp]];
+            float tmin, tmax;
+            if (!reflRayAABBIntersect(ol, dl, node.bounds, tmin, tmax)) continue;
+            if (node.is_leaf) {
+                unsigned int j = node.triangle_idx;
+                if (i == j) continue;
+                float diff_x = centers[j * 3]     - origin[0];
+                float diff_y = centers[j * 3 + 1] - origin[1];
+                float diff_z = centers[j * 3 + 2] - origin[2];
+                float proj = diff_x * dir[0] + diff_y * dir[1] + diff_z * dir[2];
+                if (proj <= 1e-5f) continue;
+                float t;
+                if (reflRayTriangleIntersect(ol, dl, triangles[j].v[0], triangles[j].v[1], triangles[j].v[2], t))
+                    return true;
+            }
+            else {
+                if (sp < 126) {
+                    stack[sp++] = node.left;
+                    stack[sp++] = node.right;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+__device__ static int rvPartsClosest(
+    const TriangleDevRefl* __restrict__ triangles,
+    const BVHNodeDevRefl* __restrict__ nodes,
+    unsigned int source, const float origin[3], const float dir[3], int nparts,
+    float& closest_t)
+{
+    int closest_idx = -1;
+    closest_t = 1e30f;
+    for (int p = 0; p < nparts; ++p) {
+        const ScenePartDev<float>& P = d_rv_parts[p];
+        float tbox;
+        if (!scene_ray_box(origin, dir, P.box, tbox) || tbox > closest_t) continue;
+        float ol[3] = { origin[0], origin[1], origin[2] }, dl[3] = { dir[0], dir[1], dir[2] };
+        if (!P.identity) scene_ray_to_part(P, origin, dir, ol, dl);
+        unsigned int stack[128];
+        int sp = 0;
+        stack[sp++] = P.root;
+        while (sp > 0) {
+            const BVHNodeDevRefl& node = nodes[stack[--sp]];
+            float tmin, tmax;
+            if (!reflRayAABBIntersect(ol, dl, node.bounds, tmin, tmax)) continue;
+            if (tmin > closest_t) continue;
+            if (node.is_leaf) {
+                unsigned int j = node.triangle_idx;
+                if (j == source) continue;
+                float t;
+                if (reflRayTriangleIntersect(ol, dl, triangles[j].v[0], triangles[j].v[1], triangles[j].v[2], t)) {
+                    if (t < closest_t) {
+                        closest_t   = t;
+                        closest_idx = (int)j;
+                    }
+                }
+            }
+            else {
+                if (sp < 126) {
+                    stack[sp++] = node.left;
+                    stack[sp++] = node.right;
+                }
+            }
+        }
+    }
+    return closest_idx;
+}
+
+__global__ void reflShadowKernel_parts(const TriangleDevRefl* __restrict__ triangles,
+    const BVHNodeDevRefl* __restrict__ nodes,
+    const float* __restrict__ centers,
+    int* __restrict__ labels, size_t N,
+    float sunX, float sunY, float sunZ, int nparts)
+{
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    if (labels[i] == 0) return;
+    float origin[3] = { centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2] };
+    float dir[3] = { sunX, sunY, sunZ };
+    if (rvPartsShadowed(triangles, nodes, centers, (unsigned int)i, origin, dir, nparts)) labels[i] = 0;
+}
+
+__global__ void reflTraceAndBounceKernel_parts(
+    const float* __restrict__ ray_origins,
+    const float* __restrict__ ray_dirs,
+    const float* __restrict__ ray_intensities,
+    const unsigned int* __restrict__ ray_sources,
+    unsigned int num_rays,
+    const TriangleDevRefl* __restrict__ triangles,
+    const BVHNodeDevRefl* __restrict__ nodes,
+    int nparts,
+    float default_alpha, float default_mu,
+    float* __restrict__ force_accum,
+    float* __restrict__ moment_accum,
+    float* __restrict__ next_ray_origins,
+    float* __restrict__ next_ray_dirs,
+    float* __restrict__ next_ray_intensities,
+    unsigned int* __restrict__ next_ray_sources,
+    unsigned int* __restrict__ next_ray_count,
+    int bounce_level,
+    int* __restrict__ d_bounce_levels,
+    float* __restrict__ d_incident_dirs,
+    float* __restrict__ d_origin_pts)
+{
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_rays) return;
+
+    float origin[3] = { ray_origins[idx * 3], ray_origins[idx * 3 + 1], ray_origins[idx * 3 + 2] };
+    float dir[3]    = { ray_dirs[idx * 3],    ray_dirs[idx * 3 + 1],    ray_dirs[idx * 3 + 2] };
+    float intensity  = ray_intensities[idx];
+    unsigned int source = ray_sources[idx];
+
+    float closest_t;
+    int closest_idx = rvPartsClosest(triangles, nodes, source, origin, dir, nparts, closest_t);
+    if (closest_idx < 0) return;
+
+    unsigned int j = (unsigned int)closest_idx;
+    float s_eq[3] = { -dir[0], -dir[1], -dir[2] };
+    float nj[3] = { triangles[j].normal[0], triangles[j].normal[1], triangles[j].normal[2] };
+    float cos_theta_j = nj[0] * s_eq[0] + nj[1] * s_eq[1] + nj[2] * s_eq[2];
+    if (cos_theta_j <= 1e-6f) return;  // back face
+
+    int prev = atomicCAS(&d_bounce_levels[j], -1, bounce_level);
+    if (prev == -1) {
+        d_incident_dirs[j * 3 + 0] = -dir[0];
+        d_incident_dirs[j * 3 + 1] = -dir[1];
+        d_incident_dirs[j * 3 + 2] = -dir[2];
+        d_origin_pts[j * 3 + 0] = origin[0];
+        d_origin_pts[j * 3 + 1] = origin[1];
+        d_origin_pts[j * 3 + 2] = origin[2];
+    }
+
+    float alpha_j = triangles[j].reflectance;
+    float mu_j    = triangles[j].specularity;
+    if (alpha_j <= 0.0f && mu_j <= 0.0f) { alpha_j = default_alpha; mu_j = default_mu; }
+
+
+    float base    = intensity;                                                                         //PHY
+    float s_coeff = -base * ((1.0f - alpha_j) + alpha_j * (1.0f - mu_j));                            //PHY
+    float n_coeff = -base * (2.0f * alpha_j * mu_j * cos_theta_j +                                   //PHY
+                             (2.0f / 3.0f) * alpha_j * (1.0f - mu_j));
+    float fx = s_coeff * s_eq[0] + n_coeff * nj[0];   //PHY
+    float fy = s_coeff * s_eq[1] + n_coeff * nj[1];   //PHY
+    float fz = s_coeff * s_eq[2] + n_coeff * nj[2];   //PHY
+    atomicAdd(&force_accum[0], fx);   //PHY
+    atomicAdd(&force_accum[1], fy);   //PHY
+    atomicAdd(&force_accum[2], fz);   //PHY
+
+    // hit point in the body frame: t is the same in the part frame
+    float hit_j[3] = { origin[0] + closest_t * dir[0],
+                        origin[1] + closest_t * dir[1],
+                        origin[2] + closest_t * dir[2] };
+    atomicAdd(&moment_accum[0], hit_j[1] * fz - hit_j[2] * fy);   //PHY
+    atomicAdd(&moment_accum[1], hit_j[2] * fx - hit_j[0] * fz);   //PHY
+    atomicAdd(&moment_accum[2], hit_j[0] * fy - hit_j[1] * fx);   //PHY
+
+    float new_intensity = intensity * alpha_j * mu_j;
+    if (new_intensity < 1e-10f) return;
+    float rnx = 2.0f * cos_theta_j * nj[0] - s_eq[0];
+    float rny = 2.0f * cos_theta_j * nj[1] - s_eq[1];
+    float rnz = 2.0f * cos_theta_j * nj[2] - s_eq[2];
+    float rnlen = sqrtf(rnx * rnx + rny * rny + rnz * rnz);
+    if (rnlen < 1e-12f) return;
+    rnx /= rnlen;  rny /= rnlen;  rnz /= rnlen;
+
+    unsigned int write_idx = atomicAdd(next_ray_count, 1u);
+    next_ray_origins[write_idx * 3]     = hit_j[0];
+    next_ray_origins[write_idx * 3 + 1] = hit_j[1];
+    next_ray_origins[write_idx * 3 + 2] = hit_j[2];
+    next_ray_dirs[write_idx * 3]     = rnx;
+    next_ray_dirs[write_idx * 3 + 1] = rny;
+    next_ray_dirs[write_idx * 3 + 2] = rnz;
+    next_ray_intensities[write_idx] = new_intensity;
+    next_ray_sources[write_idx] = j;
+}
+
+// Body-frame normals and centers of the parts that moved, from the shared copy.
+__global__ void reflScatterWorldKernel(
+    TriangleDevRefl* __restrict__ triangles, float* __restrict__ centers,
+    const double* __restrict__ world_c, const double* __restrict__ world_n,
+    unsigned int first, unsigned int count)
+{
+    unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= count) return;
+    size_t i = (size_t)first + k;
+    for (int a = 0; a < 3; ++a) {
+        triangles[i].normal[a] = static_cast<float>(world_n[3 * i + a]);
+        centers[3 * i + a]     = static_cast<float>(world_c[3 * i + a]);
+    }
+}
+
+struct ReflGPUCacheParts : ReflGPUCache {
+    std::uint64_t structure_version = 0;
+    std::uint64_t pose_version      = 0;
+    int nparts                      = 0;
+    std::vector<unsigned int> part_root;
+    std::vector<std::array<double, 6>> part_box;    // part-frame bounds of each tree
+    std::vector<std::array<double, 12>> applied;    // part transforms in the device data
+};
+
+// Rebuilt by itself when SatelliteDataset::structureVersion() changes.
+static ReflGPUCacheParts g_refl_parts;
+
+struct RvHostAABB { double min_x, min_y, min_z, max_x, max_y, max_z; };
+struct RvHostNode { RvHostAABB bounds; size_t triangle_idx; size_t left, right; bool is_leaf; };
+
+// BVH of one part (global triangle indices, part-frame vertices); same
+// construction as the monolithic tree above. Appends to `nodes`, returns the root.
+static size_t rv_build_part_bvh(const std::vector<RvHostAABB>& tball, const std::vector<std::array<double,3>>& cball,
+                                std::vector<size_t> indices, std::vector<RvHostNode>& nodes)
+{
+    auto tb = [&](size_t i) -> const RvHostAABB& { return tball[i]; };
+    auto ctr = [&](size_t i, int axis) { return cball[i][axis]; };
+    std::function<size_t(size_t, size_t)> build = [&](size_t start, size_t end) -> size_t {
+        RvHostNode node{};
+        if (end - start == 1) {
+            node.is_leaf = true;
+            node.triangle_idx = indices[start];
+            node.bounds = tb(node.triangle_idx);
+            nodes.push_back(node);
+            return nodes.size() - 1;
+        }
+        double x_min = std::numeric_limits<double>::infinity(), x_max = -x_min;
+        double y_min = x_min, y_max = -x_min;
+        double z_min = x_min, z_max = -x_min;
+        for (size_t k = start; k < end; ++k) {
+            const RvHostAABB& b = tb(indices[k]);
+            x_min = std::min(x_min, b.min_x); x_max = std::max(x_max, b.max_x);
+            y_min = std::min(y_min, b.min_y); y_max = std::max(y_max, b.max_y);
+            z_min = std::min(z_min, b.min_z); z_max = std::max(z_max, b.max_z);
+        }
+        int axis = 0;
+        if ((y_max - y_min) > (x_max - x_min) && (y_max - y_min) > (z_max - z_min)) axis = 1;
+        else if ((z_max - z_min) > (x_max - x_min)) axis = 2;
+        std::sort(indices.begin() + start, indices.begin() + end,
+            [&](size_t a, size_t b) { return ctr(a, axis) < ctr(b, axis); });
+        size_t mid = (start + end) / 2;
+        node.is_leaf = false;
+        node.left  = build(start, mid);
+        node.right = build(mid, end);
+        node.bounds = {
+            std::min(nodes[node.left].bounds.min_x, nodes[node.right].bounds.min_x),
+            std::min(nodes[node.left].bounds.min_y, nodes[node.right].bounds.min_y),
+            std::min(nodes[node.left].bounds.min_z, nodes[node.right].bounds.min_z),
+            std::max(nodes[node.left].bounds.max_x, nodes[node.right].bounds.max_x),
+            std::max(nodes[node.left].bounds.max_y, nodes[node.right].bounds.max_y),
+            std::max(nodes[node.left].bounds.max_z, nodes[node.right].bounds.max_z)
+        };
+        nodes.push_back(node);
+        return nodes.size() - 1;
+    };
+    return build(0, indices.size());
+}
+
+SRPResult calculate_labels_ray_casting_reflections_gpu_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    int max_reflections,
+    bool verbose,
+    const std::string& primary_emitter_name)
+{
+    const InstanceScene& s = ds.instanceScene();
+    if (s.N == 0) return {};
+    if (s.instances.size() > SCENE_MAX_PARTS)
+        throw std::runtime_error("too many movable components for the GPU part table");
+    // Body-frame triangles: the direct force is summed on the host, as above.
+    const std::vector<Triangle>& triangles = ds.triangles();
+
+    const float default_alpha = 0.5f;
+    const float default_mu    = 0.5f;
+    double len = sqrt(sun_vector[0] * sun_vector[0] + sun_vector[1] * sun_vector[1] + sun_vector[2] * sun_vector[2]);
+    if (len < 1e-12) throw std::runtime_error("Sun vector is zero");
+    double d_sunX = sun_vector[0] / len, d_sunY = sun_vector[1] / len, d_sunZ = sun_vector[2] / len;
+    float sunX = static_cast<float>(d_sunX), sunY = static_cast<float>(d_sunY), sunZ = static_cast<float>(d_sunZ);
+    const size_t N = s.N;
+
+    const SceneGpuView& w = scene_gpu_sync(s);
+    ReflGPUCacheParts& c = g_refl_parts;
+
+    // =============== Structure: once per file ===============
+    if (!c.valid || c.structure_version != s.structure_version || c.N != N) {
+        auto cf = [](auto*& p) { if (p) { REFL_CUDA_CHECK(cudaFree(p)); p = nullptr; } };
+        cf(c.d_tri); cf(c.d_centers); cf(c.d_nodes); cf(c.d_labels);
+        if (c.h_pinned_labels) REFL_CUDA_CHECK(cudaFreeHost(c.h_pinned_labels));
+        if (c.stream) REFL_CUDA_CHECK(cudaStreamDestroy(c.stream));
+        cf(c.d_ray_origins_A); cf(c.d_ray_dirs_A); cf(c.d_ray_intensities_A); cf(c.d_ray_sources_A);
+        cf(c.d_ray_origins_B); cf(c.d_ray_dirs_B); cf(c.d_ray_intensities_B); cf(c.d_ray_sources_B);
+        cf(c.d_ray_count_A); cf(c.d_ray_count_B); cf(c.d_force_accum); cf(c.d_moment_accum);
+        cf(c.d_bounce_levels); cf(c.d_incident_dirs); cf(c.d_origin_pts);
+        c = ReflGPUCacheParts{};
+
+        REFL_CUDA_CHECK(cudaStreamCreate(&c.stream));
+        REFL_CUDA_CHECK(cudaHostAlloc(&c.h_pinned_labels, N * sizeof(int), cudaHostAllocDefault));
+
+        std::vector<RvHostNode> nodes;
+        nodes.reserve(2 * N);
+        // part-frame bounds and centroids of every triangle, computed once
+        std::vector<RvHostAABB> tball(N);
+        std::vector<std::array<double,3>> cball(N);
+        for (size_t i = 0; i < N; ++i) {
+            const double* v = &s.part_vertices[9*i];
+            tball[i] = RvHostAABB{ std::min({v[0],v[3],v[6]}), std::min({v[1],v[4],v[7]}), std::min({v[2],v[5],v[8]}),
+                             std::max({v[0],v[3],v[6]}), std::max({v[1],v[4],v[7]}), std::max({v[2],v[5],v[8]}) };
+            cball[i] = { (v[0]+v[3]+v[6])/3.0, (v[1]+v[4]+v[7])/3.0, (v[2]+v[5]+v[8])/3.0 };
+        }
+        c.nparts = static_cast<int>(s.instances.size());
+        for (const SceneInstance& part : s.instances) {
+            std::vector<size_t> idx;
+            idx.reserve(part.size);
+            for (size_t r = 0; r < part.first.size(); ++r)
+                for (std::uint32_t i = part.first[r]; i < part.first[r] + part.count[r]; ++i) idx.push_back(i);
+            size_t root = rv_build_part_bvh(tball, cball, std::move(idx), nodes);
+            const RvHostAABB& b = nodes[root].bounds;
+            c.part_root.push_back(static_cast<unsigned int>(root));
+            c.part_box.push_back({ b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z });
+        }
+        c.numNodes = nodes.size();
+
+        std::vector<double> wc, wn;
+        scene_gpu_download(wc, wn);
+        std::vector<TriangleDevRefl> triDev(N);
+        std::vector<float> centers_flat(N * 3);
+        for (size_t i = 0; i < N; ++i) {
+            const double* v = &s.part_vertices[9 * i];
+            for (int k = 0; k < 3; ++k)
+                for (int a = 0; a < 3; ++a) triDev[i].v[k][a] = static_cast<float>(v[3 * k + a]);
+            for (int a = 0; a < 3; ++a) {
+                triDev[i].normal[a]    = static_cast<float>(wn[3 * i + a]);
+                centers_flat[3 * i + a] = static_cast<float>(wc[3 * i + a]);
+            }
+            triDev[i].reflectance = static_cast<float>(triangles[i].reflectance);
+            triDev[i].specularity = static_cast<float>(triangles[i].specularity);
+            triDev[i].emissivity  = static_cast<float>(triangles[i].emissivity);
+            triDev[i].area        = static_cast<float>(triangles[i].area);
+        }
+        std::vector<BVHNodeDevRefl> nodesDev(nodes.size());
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            nodesDev[i].bounds.min[0] = static_cast<float>(nodes[i].bounds.min_x);
+            nodesDev[i].bounds.min[1] = static_cast<float>(nodes[i].bounds.min_y);
+            nodesDev[i].bounds.min[2] = static_cast<float>(nodes[i].bounds.min_z);
+            nodesDev[i].bounds.max[0] = static_cast<float>(nodes[i].bounds.max_x);
+            nodesDev[i].bounds.max[1] = static_cast<float>(nodes[i].bounds.max_y);
+            nodesDev[i].bounds.max[2] = static_cast<float>(nodes[i].bounds.max_z);
+            nodesDev[i].triangle_idx  = static_cast<unsigned int>(nodes[i].triangle_idx);
+            nodesDev[i].left          = static_cast<unsigned int>(nodes[i].left);
+            nodesDev[i].right         = static_cast<unsigned int>(nodes[i].right);
+            nodesDev[i].is_leaf       = nodes[i].is_leaf;
+        }
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_tri,     N * sizeof(TriangleDevRefl)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_centers, N * 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_nodes,   nodes.size() * sizeof(BVHNodeDevRefl)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_labels,  N * sizeof(int)));
+        REFL_CUDA_CHECK(cudaMemset(c.d_labels, 0, N * sizeof(int)));
+        REFL_CUDA_CHECK(cudaMemcpy(c.d_tri,     triDev.data(),       N * sizeof(TriangleDevRefl),           cudaMemcpyHostToDevice));
+        REFL_CUDA_CHECK(cudaMemcpy(c.d_centers, centers_flat.data(), N * 3 * sizeof(float),                 cudaMemcpyHostToDevice));
+        REFL_CUDA_CHECK(cudaMemcpy(c.d_nodes,   nodesDev.data(),     nodes.size() * sizeof(BVHNodeDevRefl), cudaMemcpyHostToDevice));
+
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_origins_A,     N * 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_dirs_A,        N * 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_intensities_A, N * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_sources_A,     N * sizeof(unsigned int)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_origins_B,     N * 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_dirs_B,        N * 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_intensities_B, N * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_sources_B,     N * sizeof(unsigned int)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_count_A, sizeof(unsigned int)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_ray_count_B, sizeof(unsigned int)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_force_accum,  3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_moment_accum, 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_bounce_levels, N * sizeof(int)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_incident_dirs, N * 3 * sizeof(float)));
+        REFL_CUDA_CHECK(cudaMalloc(&c.d_origin_pts,    N * 3 * sizeof(float)));
+
+        c.applied.clear();
+        for (const SceneInstance& part : s.instances) c.applied.push_back(part.T);
+        c.structure_version = s.structure_version;
+        c.N = N;
+        c.valid = true;
+        if (verbose)
+            std::cout << "  CentroidGPU viz (parts): " << c.nparts << " parts, " << c.numNodes << " nodes\n";
+    }
+
+    // =============== Pose: moved parts' body-frame data, part table ===============
+    if (c.pose_version != s.pose_version) {
+        std::vector<std::uint32_t> first, count;
+        scene_moved_ranges(s, c.applied, first, count);
+        for (size_t r = 0; r < first.size(); ++r) {
+            const int bs = 256;
+            reflScatterWorldKernel<<<(count[r] + bs - 1) / bs, bs, 0, c.stream>>>(
+                c.d_tri, c.d_centers, w.d_world_c, w.d_world_n, first[r], count[r]);
+            REFL_CUDA_CHECK(cudaGetLastError());
+        }
+        std::vector<ScenePartDev<float>> table(c.nparts);
+        for (int p = 0; p < c.nparts; ++p)
+            table[p] = scene_part_entry<float>(s.instances[p], c.part_box[p].data(), c.part_root[p], 1e-5);
+        REFL_CUDA_CHECK(cudaMemcpyToSymbolAsync(d_rv_parts, table.data(), c.nparts * sizeof(ScenePartDev<float>),
+                                                0, cudaMemcpyHostToDevice, c.stream));
+        c.pose_version = s.pose_version;
+    }
+
+    // =============== Phase 1: Direct illumination ===============
+    int blockSize, minGrid;
+    cudaOccupancyMaxPotentialBlockSize(&minGrid, &blockSize, reflShadowKernel_parts, 0, 0);
+    int gridSize = (int)((N + blockSize - 1) / blockSize);
+
+    reflInitLabelsKernel<<<gridSize, blockSize, 0, c.stream>>>(c.d_tri, c.d_labels, N, sunX, sunY, sunZ);
+    REFL_CUDA_CHECK(cudaGetLastError());
+    reflShadowKernel_parts<<<gridSize, blockSize, 0, c.stream>>>(
+        c.d_tri, c.d_nodes, c.d_centers, c.d_labels, N, sunX, sunY, sunZ, c.nparts);
+    REFL_CUDA_CHECK(cudaGetLastError());
+
+    REFL_CUDA_CHECK(cudaMemcpyAsync(c.h_pinned_labels, c.d_labels, N * sizeof(int), cudaMemcpyDeviceToHost, c.stream));
+    if (!primary_emitter_name.empty()) {
+        REFL_CUDA_CHECK(cudaStreamSynchronize(c.stream));
+        for (size_t i = 0; i < N; ++i)
+            if (c.h_pinned_labels[i] == 1 && triangles[i].component_name != primary_emitter_name)
+                c.h_pinned_labels[i] = 0;
+        REFL_CUDA_CHECK(cudaMemcpyAsync(c.d_labels, c.h_pinned_labels, N * sizeof(int), cudaMemcpyHostToDevice, c.stream));
+    }
+
+    // =============== Phase 2: Multi-bounce reflections ===============
+    REFL_CUDA_CHECK(cudaMemsetAsync(c.d_force_accum,  0, 3 * sizeof(float), c.stream));
+    REFL_CUDA_CHECK(cudaMemsetAsync(c.d_moment_accum, 0, 3 * sizeof(float), c.stream));
+    if (max_reflections > 0) {
+        REFL_CUDA_CHECK(cudaMemsetAsync(c.d_bounce_levels, 0xFF, N * sizeof(int),       c.stream));
+        REFL_CUDA_CHECK(cudaMemsetAsync(c.d_incident_dirs, 0,    N * 3 * sizeof(float), c.stream));
+        REFL_CUDA_CHECK(cudaMemsetAsync(c.d_origin_pts,    0xFF, N * 3 * sizeof(float), c.stream));
+        REFL_CUDA_CHECK(cudaMemsetAsync(c.d_ray_count_A, 0, sizeof(unsigned int), c.stream));
+        reflGenerateFirstBounceKernel<<<gridSize, blockSize, 0, c.stream>>>(
+            c.d_tri, c.d_labels, c.d_centers, N, sunX, sunY, sunZ, default_alpha, default_mu,
+            c.d_ray_origins_A, c.d_ray_dirs_A, c.d_ray_intensities_A, c.d_ray_sources_A, c.d_ray_count_A,
+            c.d_bounce_levels, c.d_incident_dirs);
+        REFL_CUDA_CHECK(cudaGetLastError());
+
+        float* cur_origins = c.d_ray_origins_A, *cur_dirs = c.d_ray_dirs_A, *cur_int = c.d_ray_intensities_A;
+        unsigned int* cur_src = c.d_ray_sources_A, *cur_cnt = c.d_ray_count_A;
+        float* nxt_origins = c.d_ray_origins_B, *nxt_dirs = c.d_ray_dirs_B, *nxt_int = c.d_ray_intensities_B;
+        unsigned int* nxt_src = c.d_ray_sources_B, *nxt_cnt = c.d_ray_count_B;
+        for (int bounce = 0; bounce < max_reflections; ++bounce) {
+            unsigned int h_ray_count = 0;
+            REFL_CUDA_CHECK(cudaMemcpyAsync(&h_ray_count, cur_cnt, sizeof(unsigned int), cudaMemcpyDeviceToHost, c.stream));
+            REFL_CUDA_CHECK(cudaStreamSynchronize(c.stream));
+            if (h_ray_count == 0) break;
+            if (verbose) std::cout << "  GPU reflection bounce " << bounce << ": " << h_ray_count << " rays\n";
+            REFL_CUDA_CHECK(cudaMemsetAsync(nxt_cnt, 0, sizeof(unsigned int), c.stream));
+            int rbs, rmg;
+            cudaOccupancyMaxPotentialBlockSize(&rmg, &rbs, reflTraceAndBounceKernel_parts, 0, 0);
+            int rgs = (int)((h_ray_count + rbs - 1) / rbs);
+            reflTraceAndBounceKernel_parts<<<rgs, rbs, 0, c.stream>>>(
+                cur_origins, cur_dirs, cur_int, cur_src, h_ray_count,
+                c.d_tri, c.d_nodes, c.nparts, default_alpha, default_mu,
+                c.d_force_accum, c.d_moment_accum,
+                nxt_origins, nxt_dirs, nxt_int, nxt_src, nxt_cnt,
+                bounce + 1, c.d_bounce_levels, c.d_incident_dirs, c.d_origin_pts);
+            REFL_CUDA_CHECK(cudaGetLastError());
+            std::swap(cur_origins, nxt_origins); std::swap(cur_dirs, nxt_dirs);
+            std::swap(cur_int, nxt_int); std::swap(cur_src, nxt_src); std::swap(cur_cnt, nxt_cnt);
+        }
+    }
+
+    // =============== Collect results ===============
+    REFL_CUDA_CHECK(cudaStreamSynchronize(c.stream));
+    {
+        const double dNaN = std::numeric_limits<double>::quiet_NaN();
+        std::vector<int>                   bounce_levels(N);
+        std::vector<std::array<double, 3>> incident_dirs(N, {0.0, 0.0, 0.0});
+        std::vector<std::array<double, 3>> origin_pts(N, {dNaN, dNaN, dNaN});
+        if (max_reflections > 0) {
+            std::vector<float> h_inc(N * 3), h_orig(N * 3);
+            REFL_CUDA_CHECK(cudaMemcpy(bounce_levels.data(), c.d_bounce_levels, N * sizeof(int),       cudaMemcpyDeviceToHost));
+            REFL_CUDA_CHECK(cudaMemcpy(h_inc.data(),         c.d_incident_dirs, N * 3 * sizeof(float), cudaMemcpyDeviceToHost));
+            REFL_CUDA_CHECK(cudaMemcpy(h_orig.data(),        c.d_origin_pts,    N * 3 * sizeof(float), cudaMemcpyDeviceToHost));
+            for (size_t i = 0; i < N; ++i) {
+                incident_dirs[i] = { static_cast<double>(h_inc[i*3]),  static_cast<double>(h_inc[i*3+1]),  static_cast<double>(h_inc[i*3+2])  };
+                origin_pts[i]    = { static_cast<double>(h_orig[i*3]), static_cast<double>(h_orig[i*3+1]), static_cast<double>(h_orig[i*3+2]) };
+            }
+        } else {
+            for (size_t i = 0; i < N; ++i) bounce_levels[i] = (c.h_pinned_labels[i] == 1) ? 0 : -1;
+        }
+        set_bounce_globals(std::move(bounce_levels), std::move(incident_dirs), std::move(origin_pts));
+    }
+
+    std::vector<int> labels_host(c.h_pinned_labels, c.h_pinned_labels + N);
+    SRPResult result = compute_srp_forces(triangles, std::move(labels_host), d_sunX, d_sunY, d_sunZ);
+    if (max_reflections > 0) {
+        float h_force[3] = {0, 0, 0}, h_moment[3] = {0, 0, 0};
+        REFL_CUDA_CHECK(cudaMemcpy(h_force,  c.d_force_accum,  3 * sizeof(float), cudaMemcpyDeviceToHost));
+        REFL_CUDA_CHECK(cudaMemcpy(h_moment, c.d_moment_accum, 3 * sizeof(float), cudaMemcpyDeviceToHost));
+        for (int k = 0; k < 3; ++k) {
+            result.total_force[k]  += g_srp_phi0 * static_cast<double>(h_force[k]);
+            result.total_moment[k] += g_srp_phi0 * static_cast<double>(h_moment[k]);
+        }
+    }
+    return result;
+}

@@ -6,7 +6,10 @@
 // structures. A part is the fixed body or one component declared movable in
 // the HDF5 file ("revolute" / "prismatic") together with its fixed
 // descendants; a movable component nested in another one is a part of its
-// own. The split is fixed by the file. Triangles keep their global indices
+// own. Only the file decides what may move; a movable component is a
+// separate part exactly while it is out of the pose stored in the file
+// (otherwise it stays with the body, and a model with a single part is
+// computed by the single-structure path of 1.1.0). Triangles keep their global indices
 // (the order of SatelliteDataset::triangles()), so labels and visualisation
 // data are indexed exactly as before. The GPU builds one acceleration
 // structure per part in the part frame and moves a part by changing its

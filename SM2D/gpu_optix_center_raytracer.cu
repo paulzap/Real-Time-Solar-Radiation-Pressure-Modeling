@@ -13,6 +13,7 @@
 // ============================================================
 
 #include "gpu_optix_shared_internal.h"
+#include "gpu_instance_scene.h"
 #include "gpu_optix_raytracer.h"
 #include <fstream>
 #include <sstream>
@@ -70,6 +71,7 @@ struct RTXCenterState {
 };
 
 static RTXCenterState g_center;
+static RTXCenterState g_center_inst;   // files with movable components: IAS over per-part GASes
 
 // ---------------------------------------------------------------------------
 // load_ptx_center
@@ -99,7 +101,7 @@ static std::string load_ptx_center()
 // ---------------------------------------------------------------------------
 // build_center_pipeline  (called once after context exists)
 // ---------------------------------------------------------------------------
-static void build_center_pipeline()
+static void build_center_pipeline(RTXCenterState& st, bool instanced)
 {
     std::string ptx_source = load_ptx_center();
 
@@ -109,7 +111,9 @@ static void build_center_pipeline()
     mco.debugLevel       = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
 
     OptixPipelineCompileOptions pco = {};
-    pco.traversableGraphFlags            = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
+    pco.traversableGraphFlags            = instanced
+        ? OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING
+        : OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
     pco.numPayloadValues                 = 2;
     pco.numAttributeValues               = 2;
     pco.pipelineLaunchParamsVariableName = "params";
@@ -120,66 +124,66 @@ static void build_center_pipeline()
     OPTIX_CHECK(optixModuleCreate(
         g_rtx_shared.context, &mco, &pco,
         ptx_source.c_str(), ptx_source.size(),
-        log, &log_size, &g_center.module));
+        log, &log_size, &st.module));
 
     OptixProgramGroupOptions pg_opts = {};
 
     // raygen
     { OptixProgramGroupDesc d = {};
       d.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
-      d.raygen.module = g_center.module;
+      d.raygen.module = st.module;
       d.raygen.entryFunctionName = "__raygen__center";
       log_size = sizeof(log);
       OPTIX_CHECK(optixProgramGroupCreate(g_rtx_shared.context, &d, 1,
-                                          &pg_opts, log, &log_size, &g_center.pg_raygen)); }
+                                          &pg_opts, log, &log_size, &st.pg_raygen)); }
     // miss
     { OptixProgramGroupDesc d = {};
       d.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
-      d.miss.module = g_center.module;
+      d.miss.module = st.module;
       d.miss.entryFunctionName = "__miss__center";
       log_size = sizeof(log);
       OPTIX_CHECK(optixProgramGroupCreate(g_rtx_shared.context, &d, 1,
-                                          &pg_opts, log, &log_size, &g_center.pg_miss)); }
+                                          &pg_opts, log, &log_size, &st.pg_miss)); }
     // closesthit
     { OptixProgramGroupDesc d = {};
       d.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-      d.hitgroup.moduleCH            = g_center.module;
+      d.hitgroup.moduleCH            = st.module;
       d.hitgroup.entryFunctionNameCH = "__closesthit__center";
       log_size = sizeof(log);
       OPTIX_CHECK(optixProgramGroupCreate(g_rtx_shared.context, &d, 1,
-                                          &pg_opts, log, &log_size, &g_center.pg_hit)); }
+                                          &pg_opts, log, &log_size, &st.pg_hit)); }
 
     // Pipeline
     OptixPipelineLinkOptions plo = {};
     plo.maxTraceDepth = 1;
-    OptixProgramGroup pgs[] = { g_center.pg_raygen, g_center.pg_miss, g_center.pg_hit };
+    OptixProgramGroup pgs[] = { st.pg_raygen, st.pg_miss, st.pg_hit };
     log_size = sizeof(log);
     OPTIX_CHECK(optixPipelineCreate(g_rtx_shared.context, &pco, &plo,
-                                    pgs, 3, log, &log_size, &g_center.pipeline));
-    OPTIX_CHECK(optixPipelineSetStackSize(g_center.pipeline, 0, 0, 2048, 1));
+                                    pgs, 3, log, &log_size, &st.pipeline));
+    OPTIX_CHECK(optixPipelineSetStackSize(st.pipeline, 0, 0, 2048, instanced ? 2 : 1));
 
     // SBT
-    make_sbt_record(g_center.pg_raygen, sizeof(RaygenRecord),   g_center.d_sbt_rg);
-    make_sbt_record(g_center.pg_miss,   sizeof(MissRecord),     g_center.d_sbt_ms);
-    make_sbt_record(g_center.pg_hit,    sizeof(HitgroupRecord), g_center.d_sbt_hg);
+    make_sbt_record(st.pg_raygen, sizeof(RaygenRecord),   st.d_sbt_rg);
+    make_sbt_record(st.pg_miss,   sizeof(MissRecord),     st.d_sbt_ms);
+    make_sbt_record(st.pg_hit,    sizeof(HitgroupRecord), st.d_sbt_hg);
 
-    g_center.sbt = {};
-    g_center.sbt.raygenRecord                = g_center.d_sbt_rg;
-    g_center.sbt.missRecordBase              = g_center.d_sbt_ms;
-    g_center.sbt.missRecordStrideInBytes     = sizeof(MissRecord);
-    g_center.sbt.missRecordCount             = 1;
-    g_center.sbt.hitgroupRecordBase          = g_center.d_sbt_hg;
-    g_center.sbt.hitgroupRecordStrideInBytes = sizeof(HitgroupRecord);
-    g_center.sbt.hitgroupRecordCount         = 1;
+    st.sbt = {};
+    st.sbt.raygenRecord                = st.d_sbt_rg;
+    st.sbt.missRecordBase              = st.d_sbt_ms;
+    st.sbt.missRecordStrideInBytes     = sizeof(MissRecord);
+    st.sbt.missRecordCount             = 1;
+    st.sbt.hitgroupRecordBase          = st.d_sbt_hg;
+    st.sbt.hitgroupRecordStrideInBytes = sizeof(HitgroupRecord);
+    st.sbt.hitgroupRecordCount         = 1;
 
     // Force / moment / params buffers
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_center.d_force),       3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_center.d_moment),      3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_center.d_refl_force),  3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_center.d_refl_moment), 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_center.d_params),      sizeof(RTXParamsCenter)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_force),       3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_moment),      3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_refl_force),  3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_refl_moment), 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_params),      sizeof(RTXParamsCenter)));
 
-    g_center.built = true;
+    st.built = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,19 +192,22 @@ static void build_center_pipeline()
 static void ensure_center(const std::vector<Triangle>& triangles)
 {
     ensure_rtx_common(triangles);
-    if (!g_center.built) build_center_pipeline();
+    if (!g_center.built) build_center_pipeline(g_center, false);
 }
 
 // ---------------------------------------------------------------------------
 // calculate_labels_ray_casting_rtx  (method 7)
 // ---------------------------------------------------------------------------
-SRPResult calculate_labels_ray_casting_rtx(
-    const std::vector<Triangle>& triangles,
+static SRPResult calculate_labels_ray_casting_rtx_impl(
+    const std::vector<Triangle>* tri_in,
+    const SatelliteDataset* ds,
     const std::vector<double>& sun_vector,
     int max_reflections,
     const std::string& primary_emitter_name)
 {
     try {
+        // two-level files: body-frame triangle list for the host-side post-processing
+        const std::vector<Triangle>& triangles = ds ? ds->triangles() : *tri_in;
         if (triangles.empty()) return {};
 
         double slen = std::sqrt(sun_vector[0]*sun_vector[0] +
@@ -212,19 +219,25 @@ SRPResult calculate_labels_ray_casting_rtx(
         float sy = (float)(sun_vector[1] / slen);
         float sz = (float)(sun_vector[2] / slen);
 
-        ensure_center(triangles);
+        if (ds) {
+            ensure_rtx_parts(*ds);
+            if (!g_center_inst.built) build_center_pipeline(g_center_inst, true);
+        } else {
+            ensure_center(*tri_in);
+        }
+        RTXCenterState& st = ds ? g_center_inst : g_center;
         const size_t N = g_rtx_shared.N;
         const CUstream s = g_rtx_shared.stream;
 
         // Reset per-call buffers
         reset_rtx_per_call_buffers();
-        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(g_center.d_force),       0,
+        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(st.d_force),       0,
                                    3 * sizeof(float), s));
-        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(g_center.d_moment),      0,
+        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(st.d_moment),      0,
                                    3 * sizeof(float), s));
-        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(g_center.d_refl_force),  0,
+        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(st.d_refl_force),  0,
                                    3 * sizeof(float), s));
-        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(g_center.d_refl_moment), 0,
+        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(st.d_refl_moment), 0,
                                    3 * sizeof(float), s));
 
         // Build and upload params
@@ -235,10 +248,10 @@ SRPResult calculate_labels_ray_casting_rtx(
         h_params.d_bounce_levels = reinterpret_cast<int*>(g_rtx_shared.d_bounce_levels);
         h_params.d_incident_dirs = reinterpret_cast<float*>(g_rtx_shared.d_incident_dirs);
         h_params.d_origin_pts    = reinterpret_cast<float*>(g_rtx_shared.d_origin_pts);
-        h_params.d_force         = reinterpret_cast<float*>(g_center.d_force);
-        h_params.d_moment        = reinterpret_cast<float*>(g_center.d_moment);
-        h_params.d_refl_force    = reinterpret_cast<float*>(g_center.d_refl_force);
-        h_params.d_refl_moment   = reinterpret_cast<float*>(g_center.d_refl_moment);
+        h_params.d_force         = reinterpret_cast<float*>(st.d_force);
+        h_params.d_moment        = reinterpret_cast<float*>(st.d_moment);
+        h_params.d_refl_force    = reinterpret_cast<float*>(st.d_refl_force);
+        h_params.d_refl_moment   = reinterpret_cast<float*>(st.d_refl_moment);
         h_params.d_centroids     = reinterpret_cast<float3*>(g_rtx_shared.d_centroids);
         h_params.d_normals       = reinterpret_cast<float3*>(g_rtx_shared.d_normals);
         h_params.d_areas         = reinterpret_cast<float*>(g_rtx_shared.d_areas);
@@ -247,13 +260,13 @@ SRPResult calculate_labels_ray_casting_rtx(
         h_params.N               = (int)N;
         h_params.max_reflections = max_reflections;
 
-        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(g_center.d_params), &h_params,
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(st.d_params), &h_params,
                                    sizeof(RTXParamsCenter), cudaMemcpyHostToDevice, s));
 
         // Launch
-        OPTIX_CHECK(optixLaunch(g_center.pipeline, s,
-                                g_center.d_params, sizeof(RTXParamsCenter),
-                                &g_center.sbt,
+        OPTIX_CHECK(optixLaunch(st.pipeline, s,
+                                st.d_params, sizeof(RTXParamsCenter),
+                                &st.sbt,
                                 (unsigned int)N, 1, 1));
         CUDA_CHECK(cudaStreamSynchronize(s));
 
@@ -325,10 +338,10 @@ SRPResult calculate_labels_ray_casting_rtx(
         // reflection contributions are small relative to direct illumination.
         float h_refl_force[3] = {}, h_refl_moment[3] = {};
         CUDA_CHECK(cudaMemcpy(h_refl_force,
-                              reinterpret_cast<void*>(g_center.d_refl_force),
+                              reinterpret_cast<void*>(st.d_refl_force),
                               3 * sizeof(float), cudaMemcpyDeviceToHost));
         CUDA_CHECK(cudaMemcpy(h_refl_moment,
-                              reinterpret_cast<void*>(g_center.d_refl_moment),
+                              reinterpret_cast<void*>(st.d_refl_moment),
                               3 * sizeof(float), cudaMemcpyDeviceToHost));
         result.total_force[0]  += g_srp_phi0*(double)h_refl_force[0];
         result.total_force[1]  += g_srp_phi0*(double)h_refl_force[1];
@@ -342,4 +355,23 @@ SRPResult calculate_labels_ray_casting_rtx(
         throw std::runtime_error(
             std::string("RTX/OptiX not available (ray_casting_rtx): ") + e.what());
     }
+}
+
+SRPResult calculate_labels_ray_casting_rtx(
+    const std::vector<Triangle>& triangles,
+    const std::vector<double>& sun_vector,
+    int max_reflections,
+    const std::string& primary_emitter_name)
+{
+    return calculate_labels_ray_casting_rtx_impl(&triangles, nullptr, sun_vector, max_reflections, primary_emitter_name);
+}
+
+// Two-level variant for files with movable components (gpu_optix_shared_internal.h).
+SRPResult calculate_labels_ray_casting_rtx_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    int max_reflections,
+    const std::string& primary_emitter_name)
+{
+    return calculate_labels_ray_casting_rtx_impl(nullptr, &ds, sun_vector, max_reflections, primary_emitter_name);
 }

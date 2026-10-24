@@ -217,6 +217,7 @@
     <ClInclude Include="gpu_optix_raytracer.h" />
     <ClInclude Include="gpu_optix_shared_internal.h" />
     <ClInclude Include="instance_scene.h" />
+    <ClInclude Include="gpu_instance_scene.h" />
     <ClInclude Include="bench_methods.h" />
     <ClInclude Include="SatelliteDataset.h" />
     <ClInclude Include="ShadowAlgorithms.h" />
@@ -259,6 +260,9 @@
       <FileType>Document</FileType>
     </CudaCompile>
     <CudaCompile Include="gpu_reflection_raytracer.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_instance_scene.cu">
       <FileType>Document</FileType>
     </CudaCompile>
     <CudaCompile Include="gpu_reflection_raytracer_bench.cu">

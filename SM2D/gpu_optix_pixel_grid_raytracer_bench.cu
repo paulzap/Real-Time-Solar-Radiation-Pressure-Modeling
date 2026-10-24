@@ -14,6 +14,7 @@
 // ============================================================
 
 #include "gpu_optix_shared_internal.h"
+#include "gpu_instance_scene.h"
 #include "bench_methods.h"
 #include <fstream>
 #include <sstream>
@@ -69,6 +70,7 @@ struct RTXGridBenchState {
 };
 
 static RTXGridBenchState g_grid_bench;
+static RTXGridBenchState g_grid_bench_inst;   // files with movable components: IAS over per-part GASes
 
 // ---------------------------------------------------------------------------
 // load_ptx_grid_bench
@@ -102,7 +104,7 @@ static std::string load_ptx_grid_bench()
 // ---------------------------------------------------------------------------
 // build_grid_bench_pipeline
 // ---------------------------------------------------------------------------
-static void build_grid_bench_pipeline()
+static void build_grid_bench_pipeline(RTXGridBenchState& st, bool instanced)
 {
     std::string ptx_source = load_ptx_grid_bench();
 
@@ -112,7 +114,9 @@ static void build_grid_bench_pipeline()
     mco.debugLevel       = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
 
     OptixPipelineCompileOptions pco = {};
-    pco.traversableGraphFlags            = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
+    pco.traversableGraphFlags            = instanced
+        ? OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING
+        : OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
     pco.numPayloadValues                 = 2;
     pco.numAttributeValues               = 2;
     pco.pipelineLaunchParamsVariableName = "params";
@@ -123,60 +127,60 @@ static void build_grid_bench_pipeline()
     OPTIX_CHECK(optixModuleCreate(
         g_rtx_shared.context, &mco, &pco,
         ptx_source.c_str(), ptx_source.size(),
-        log, &log_size, &g_grid_bench.module));
+        log, &log_size, &st.module));
 
     OptixProgramGroupOptions pg_opts = {};
 
     { OptixProgramGroupDesc d = {};
       d.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
-      d.raygen.module = g_grid_bench.module;
+      d.raygen.module = st.module;
       d.raygen.entryFunctionName = "__raygen__pixel_grid_bench";
       log_size = sizeof(log);
       OPTIX_CHECK(optixProgramGroupCreate(g_rtx_shared.context, &d, 1,
-                                          &pg_opts, log, &log_size, &g_grid_bench.pg_raygen)); }
+                                          &pg_opts, log, &log_size, &st.pg_raygen)); }
 
     { OptixProgramGroupDesc d = {};
       d.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
-      d.miss.module = g_grid_bench.module;
+      d.miss.module = st.module;
       d.miss.entryFunctionName = "__miss__pixel_grid_bench";
       log_size = sizeof(log);
       OPTIX_CHECK(optixProgramGroupCreate(g_rtx_shared.context, &d, 1,
-                                          &pg_opts, log, &log_size, &g_grid_bench.pg_miss)); }
+                                          &pg_opts, log, &log_size, &st.pg_miss)); }
 
     { OptixProgramGroupDesc d = {};
       d.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-      d.hitgroup.moduleCH            = g_grid_bench.module;
+      d.hitgroup.moduleCH            = st.module;
       d.hitgroup.entryFunctionNameCH = "__closesthit__pixel_grid_bench";
       log_size = sizeof(log);
       OPTIX_CHECK(optixProgramGroupCreate(g_rtx_shared.context, &d, 1,
-                                          &pg_opts, log, &log_size, &g_grid_bench.pg_hit)); }
+                                          &pg_opts, log, &log_size, &st.pg_hit)); }
 
     OptixPipelineLinkOptions plo = {};
     plo.maxTraceDepth = 1;
-    OptixProgramGroup pgs[] = { g_grid_bench.pg_raygen, g_grid_bench.pg_miss, g_grid_bench.pg_hit };
+    OptixProgramGroup pgs[] = { st.pg_raygen, st.pg_miss, st.pg_hit };
     log_size = sizeof(log);
     OPTIX_CHECK(optixPipelineCreate(g_rtx_shared.context, &pco, &plo,
-                                    pgs, 3, log, &log_size, &g_grid_bench.pipeline));
-    OPTIX_CHECK(optixPipelineSetStackSize(g_grid_bench.pipeline, 0, 0, 2048, 1));
+                                    pgs, 3, log, &log_size, &st.pipeline));
+    OPTIX_CHECK(optixPipelineSetStackSize(st.pipeline, 0, 0, 2048, instanced ? 2 : 1));
 
-    make_sbt_record(g_grid_bench.pg_raygen, sizeof(RaygenRecord),   g_grid_bench.d_sbt_rg);
-    make_sbt_record(g_grid_bench.pg_miss,   sizeof(MissRecord),     g_grid_bench.d_sbt_ms);
-    make_sbt_record(g_grid_bench.pg_hit,    sizeof(HitgroupRecord), g_grid_bench.d_sbt_hg);
+    make_sbt_record(st.pg_raygen, sizeof(RaygenRecord),   st.d_sbt_rg);
+    make_sbt_record(st.pg_miss,   sizeof(MissRecord),     st.d_sbt_ms);
+    make_sbt_record(st.pg_hit,    sizeof(HitgroupRecord), st.d_sbt_hg);
 
-    g_grid_bench.sbt = {};
-    g_grid_bench.sbt.raygenRecord                = g_grid_bench.d_sbt_rg;
-    g_grid_bench.sbt.missRecordBase              = g_grid_bench.d_sbt_ms;
-    g_grid_bench.sbt.missRecordStrideInBytes     = sizeof(MissRecord);
-    g_grid_bench.sbt.missRecordCount             = 1;
-    g_grid_bench.sbt.hitgroupRecordBase          = g_grid_bench.d_sbt_hg;
-    g_grid_bench.sbt.hitgroupRecordStrideInBytes = sizeof(HitgroupRecord);
-    g_grid_bench.sbt.hitgroupRecordCount         = 1;
+    st.sbt = {};
+    st.sbt.raygenRecord                = st.d_sbt_rg;
+    st.sbt.missRecordBase              = st.d_sbt_ms;
+    st.sbt.missRecordStrideInBytes     = sizeof(MissRecord);
+    st.sbt.missRecordCount             = 1;
+    st.sbt.hitgroupRecordBase          = st.d_sbt_hg;
+    st.sbt.hitgroupRecordStrideInBytes = sizeof(HitgroupRecord);
+    st.sbt.hitgroupRecordCount         = 1;
 
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_grid_bench.d_force),  3 * sizeof(double)));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_grid_bench.d_moment), 3 * sizeof(double)));
-    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&g_grid_bench.d_params), sizeof(RTXParamsGridBench)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_force),  3 * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_moment), 3 * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&st.d_params), sizeof(RTXParamsGridBench)));
 
-    g_grid_bench.built = true;
+    st.built = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +189,7 @@ static void build_grid_bench_pipeline()
 static void ensure_grid_bench(const std::vector<Triangle>& triangles)
 {
     ensure_rtx_common(triangles);
-    if (!g_grid_bench.built) build_grid_bench_pipeline();
+    if (!g_grid_bench.built) build_grid_bench_pipeline(g_grid_bench, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,15 +218,16 @@ __global__ void rtx_grid_bench_backface_filter(
 // ---------------------------------------------------------------------------
 // calculate_labels_pixel_grid_rtx_bench  (benchmark-only method 8)
 // ---------------------------------------------------------------------------
-SRPResult calculate_labels_pixel_grid_rtx_bench(
-    const std::vector<Triangle>& triangles,
+static SRPResult calculate_labels_pixel_grid_rtx_bench_impl(
+    const std::vector<Triangle>* tri_in,
+    const SatelliteDataset* ds,
     const std::vector<double>& sun_vector,
     double grid_step,
     int max_reflections,
     bool verbose)
 {
     try {
-        if (triangles.empty()) return {};
+        if ((ds ? (size_t)ds->triangleCount() : tri_in->size()) == 0) return {};
 
         double slen = std::sqrt(sun_vector[0]*sun_vector[0] +
                                 sun_vector[1]*sun_vector[1] +
@@ -256,19 +261,30 @@ SRPResult calculate_labels_pixel_grid_rtx_bench(
         float v_min_ =  1e30f, v_max_ = -1e30f;
         float s_max_ = -1e30f;
 
-        for (const auto& t : triangles) {
-            float verts[3][3] = {
-                { (float)t.v1_x, (float)t.v1_y, (float)t.v1_z },
-                { (float)t.v2_x, (float)t.v2_y, (float)t.v2_z },
-                { (float)t.v3_x, (float)t.v3_y, (float)t.v3_z }
-            };
-            for (int vi = 0; vi < 3; ++vi) {
-                float pu = verts[vi][0]*u_axis.x + verts[vi][1]*u_axis.y + verts[vi][2]*u_axis.z;
-                float pv = verts[vi][0]*v_axis.x + verts[vi][1]*v_axis.y + verts[vi][2]*v_axis.z;
-                float ps = verts[vi][0]*sx        + verts[vi][1]*sy        + verts[vi][2]*sz;
-                u_min  = std::min(u_min,  pu); u_max  = std::max(u_max,  pu);
-                v_min_ = std::min(v_min_, pv); v_max_ = std::max(v_max_, pv);
-                s_max_ = std::max(s_max_, ps);
+        if (ds) {
+            const float U[3] = { u_axis.x, u_axis.y, u_axis.z };
+            const float V[3] = { v_axis.x, v_axis.y, v_axis.z };
+            const float S[3] = { sx, sy, sz };
+            // through temporaries: the window variables keep no address, so the
+            // loop below can hold them in registers
+            float e0, e1, e2, e3, e4;
+            scene_grid_extents_f(ds->instanceScene(), U, V, S, e0, e1, e2, e3, e4);
+            u_min = e0; u_max = e1; v_min_ = e2; v_max_ = e3; s_max_ = e4;
+        } else {
+            for (const auto& t : *tri_in) {
+                float verts[3][3] = {
+                    { (float)t.v1_x, (float)t.v1_y, (float)t.v1_z },
+                    { (float)t.v2_x, (float)t.v2_y, (float)t.v2_z },
+                    { (float)t.v3_x, (float)t.v3_y, (float)t.v3_z }
+                };
+                for (int vi = 0; vi < 3; ++vi) {
+                    float pu = verts[vi][0]*u_axis.x + verts[vi][1]*u_axis.y + verts[vi][2]*u_axis.z;
+                    float pv = verts[vi][0]*v_axis.x + verts[vi][1]*v_axis.y + verts[vi][2]*v_axis.z;
+                    float ps = verts[vi][0]*sx        + verts[vi][1]*sy        + verts[vi][2]*sz;
+                    u_min  = std::min(u_min,  pu); u_max  = std::max(u_max,  pu);
+                    v_min_ = std::min(v_min_, pv); v_max_ = std::max(v_max_, pv);
+                    s_max_ = std::max(s_max_, ps);
+                }
             }
         }
 
@@ -292,23 +308,29 @@ SRPResult calculate_labels_pixel_grid_rtx_bench(
                       << " rays, step=" << fstep << "\n";
         }
 
-        ensure_grid_bench(triangles);
+        if (ds) {
+            ensure_rtx_parts(*ds);
+            if (!g_grid_bench_inst.built) build_grid_bench_pipeline(g_grid_bench_inst, true);
+        } else {
+            ensure_grid_bench(*tri_in);
+        }
+        RTXGridBenchState& st = ds ? g_grid_bench_inst : g_grid_bench;
         const size_t N = g_rtx_shared.N;
         const CUstream s = g_rtx_shared.stream;
 
         // Zero labels only - bounce arrays untouched (bench optimization)
         reset_bench_labels_only_grid();
-        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(g_grid_bench.d_force),  0,
+        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(st.d_force),  0,
                                    3 * sizeof(double), s));
-        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(g_grid_bench.d_moment), 0,
+        CUDA_CHECK(cudaMemsetAsync(reinterpret_cast<void*>(st.d_moment), 0,
                                    3 * sizeof(double), s));
 
         RTXParamsGridBench h_params = {};
         h_params.bvh             = g_rtx_shared.bvh;
         h_params.sun             = sun_f;
         h_params.d_labels        = reinterpret_cast<int*>(g_rtx_shared.d_labels);
-        h_params.d_force         = reinterpret_cast<double*>(g_grid_bench.d_force);
-        h_params.d_moment        = reinterpret_cast<double*>(g_grid_bench.d_moment);
+        h_params.d_force         = reinterpret_cast<double*>(st.d_force);
+        h_params.d_moment        = reinterpret_cast<double*>(st.d_moment);
         h_params.d_normals       = reinterpret_cast<float3*>(g_rtx_shared.d_normals);
         h_params.d_areas         = reinterpret_cast<float*>(g_rtx_shared.d_areas);
         h_params.d_reflectance   = reinterpret_cast<float*>(g_rtx_shared.d_reflectance);
@@ -322,12 +344,12 @@ SRPResult calculate_labels_pixel_grid_rtx_bench(
         h_params.v_axis          = v_axis;
         h_params.t_start         = t_start;
 
-        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(g_grid_bench.d_params), &h_params,
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(st.d_params), &h_params,
                                    sizeof(RTXParamsGridBench), cudaMemcpyHostToDevice, s));
 
-        OPTIX_CHECK(optixLaunch(g_grid_bench.pipeline, s,
-                                g_grid_bench.d_params, sizeof(RTXParamsGridBench),
-                                &g_grid_bench.sbt,
+        OPTIX_CHECK(optixLaunch(st.pipeline, s,
+                                st.d_params, sizeof(RTXParamsGridBench),
+                                &st.sbt,
                                 nu, nv, 1));
 
         // Post-filter on GPU: queued on stream s after optixLaunch, no extra sync needed.
@@ -345,10 +367,10 @@ SRPResult calculate_labels_pixel_grid_rtx_bench(
         double h_force[3]  = {};
         double h_moment[3] = {};
         CUDA_CHECK(cudaMemcpy(h_force,
-                              reinterpret_cast<void*>(g_grid_bench.d_force),
+                              reinterpret_cast<void*>(st.d_force),
                               3 * sizeof(double), cudaMemcpyDeviceToHost));
         CUDA_CHECK(cudaMemcpy(h_moment,
-                              reinterpret_cast<void*>(g_grid_bench.d_moment),
+                              reinterpret_cast<void*>(st.d_moment),
                               3 * sizeof(double), cudaMemcpyDeviceToHost));
 
         // Reflections are now handled entirely in the shader (area_w = s², classical method).
@@ -363,4 +385,25 @@ SRPResult calculate_labels_pixel_grid_rtx_bench(
         throw std::runtime_error(
             std::string("RTX bench not available (pixel_grid_rtx_bench): ") + e.what());
     }
+}
+
+SRPResult calculate_labels_pixel_grid_rtx_bench(
+    const std::vector<Triangle>& triangles,
+    const std::vector<double>& sun_vector,
+    double grid_step,
+    int max_reflections,
+    bool verbose)
+{
+    return calculate_labels_pixel_grid_rtx_bench_impl(&triangles, nullptr, sun_vector, grid_step, max_reflections, verbose);
+}
+
+// Two-level variant for files with movable components (gpu_optix_shared_internal.h).
+SRPResult calculate_labels_pixel_grid_rtx_bench_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    double grid_step,
+    int max_reflections,
+    bool verbose)
+{
+    return calculate_labels_pixel_grid_rtx_bench_impl(nullptr, &ds, sun_vector, grid_step, max_reflections, verbose);
 }

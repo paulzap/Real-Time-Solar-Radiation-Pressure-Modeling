@@ -6,6 +6,7 @@
 #endif
 #include "bench_methods.h"
 #include "gpu_geometry_cache.h"
+#include "instance_scene.h"
 #include <stdexcept>
 #include <cmath>
 #include <iostream>
@@ -19,14 +20,16 @@
 // -----------------------------------------------------------------------------
 // GPU geometry synchronisation
 //
-// The GPU/RTX backends keep the triangle list in device memory between calls
-// and rebuild it by themselves only when the triangle count changes. Rotating
-// a panel (or loading another file with the same count) keeps the count, so
-// before every GPU/RTX call the engine compares the dataset's geometry version
-// with the version currently held on the GPU and drops the device copies when
-// they differ. The version is process-wide because the device copies are.
+// The GPU/RTX backends keep the geometry in device memory between calls.
+// A file without movable components uses one BVH over the triangle list (the
+// 1.1.0 path); its geometry can only change by reading a file. A file with
+// movable components uses the two-level copies, which follow pose changes by
+// themselves (see gpu_instance_scene.h, gpu_optix_shared_internal.h). So the
+// engine drops all device copies only when the dataset's structure version
+// (changed by every file read) differs from the one last sent to the GPU.
+// The version is process-wide because the device copies are.
 // -----------------------------------------------------------------------------
-static std::uint64_t g_gpu_geometry_version = 0;   // 0 = nothing uploaded yet
+static std::uint64_t g_gpu_structure_version = 0;   // 0 = nothing uploaded yet
 
 static bool method_uses_gpu(SRPMethod m) {
     return m != SRPMethod::CentroidCPU && m != SRPMethod::PixelGridCPU;
@@ -79,10 +82,10 @@ struct SRPEngine::Impl {
     // Make the GPU copies of the geometry match the dataset (see above).
     void sync_gpu_geometry(SRPMethod method) {
         if (!method_uses_gpu(method)) return;
-        const std::uint64_t v = ds.geometryVersion();
-        if (v != g_gpu_geometry_version) {
+        const std::uint64_t v = ds.structureVersion();
+        if (v != g_gpu_structure_version) {
             invalidate_all_gpu_geometry();
-            g_gpu_geometry_version = v;
+            g_gpu_structure_version = v;
         }
     }
 
@@ -101,46 +104,52 @@ struct SRPEngine::Impl {
     // CPU branches always populate bounce globals internally (cheap on CPU).
     SRPResult compute(SRPMethod method) {
         sync_gpu_geometry(method);
-        const auto& triangles = ds.triangles();
         std::vector<double> sun_vec = { sun_dir[0], sun_dir[1], sun_dir[2] };
+        // A file with movable components goes through the two-level GPU path,
+        // which moves the rigid parts and does not need the triangle list.
+        const bool parts = method_uses_gpu(method) && !ds.instanceScene().single();
 
         switch (method) {
         case SRPMethod::CentroidCPU:
             last_result = calculate_labels_ray_casting_reflections(
-                triangles, sun_vec, max_reflections, /*verbose=*/false);
+                ds.triangles(), sun_vec, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::CentroidGPU:
 #ifdef SM3D_HAS_CUDA
-            last_result = calculate_labels_reflections_gpu_bench(
-                triangles, sun_vec, max_reflections, /*verbose=*/false);
+            last_result = parts
+                ? calculate_labels_reflections_gpu_bench_parts(ds, sun_vec, max_reflections, /*verbose=*/false)
+                : calculate_labels_reflections_gpu_bench(ds.triangles(), sun_vec, max_reflections, /*verbose=*/false);
 #else
             throw std::runtime_error("CentroidGPU requires CUDA. Use CentroidCPU or rebuild with CUDA support.");
 #endif
             break;
         case SRPMethod::CentroidRTX:
 #ifdef SM3D_HAS_OPTIX
-            last_result = calculate_labels_ray_casting_rtx_bench(
-                triangles, sun_vec, max_reflections);
+            last_result = parts
+                ? calculate_labels_ray_casting_rtx_bench_parts(ds, sun_vec, max_reflections)
+                : calculate_labels_ray_casting_rtx_bench(ds.triangles(), sun_vec, max_reflections);
 #else
             throw std::runtime_error("CentroidRTX requires OptiX. Use CentroidCPU/CentroidGPU or rebuild with OptiX support.");
 #endif
             break;
         case SRPMethod::PixelGridCPU:
             last_result = calculate_labels_pixel_grid(
-                triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+                ds.triangles(), sun_vec, grid_step, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::PixelGridGPU:
 #ifdef SM3D_HAS_CUDA
-            last_result = calculate_labels_pixel_grid_gpu_bench(
-                triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+            last_result = parts
+                ? calculate_labels_pixel_grid_gpu_bench_parts(ds, sun_vec, grid_step, max_reflections, /*verbose=*/false)
+                : calculate_labels_pixel_grid_gpu_bench(ds.triangles(), sun_vec, grid_step, max_reflections, /*verbose=*/false);
 #else
             throw std::runtime_error("PixelGridGPU requires CUDA. Use PixelGridCPU or rebuild with CUDA support.");
 #endif
             break;
         case SRPMethod::PixelGridRTX:
 #ifdef SM3D_HAS_OPTIX
-            last_result = calculate_labels_pixel_grid_rtx_bench(
-                triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+            last_result = parts
+                ? calculate_labels_pixel_grid_rtx_bench_parts(ds, sun_vec, grid_step, max_reflections, /*verbose=*/false)
+                : calculate_labels_pixel_grid_rtx_bench(ds.triangles(), sun_vec, grid_step, max_reflections, /*verbose=*/false);
 #else
             throw std::runtime_error("PixelGridRTX requires OptiX. Use PixelGridCPU/PixelGridGPU or rebuild with OptiX support.");
 #endif
@@ -156,46 +165,50 @@ struct SRPEngine::Impl {
     // After return, getBounceLevels() / getIncidentDirs() / getOriginPts() are valid.
     SRPResult computeViz(SRPMethod method) {
         sync_gpu_geometry(method);
-        const auto& triangles = ds.triangles();
         std::vector<double> sun_vec = { sun_dir[0], sun_dir[1], sun_dir[2] };
+        const bool parts = method_uses_gpu(method) && !ds.instanceScene().single();
 
         switch (method) {
         case SRPMethod::CentroidCPU:
             last_result = calculate_labels_ray_casting_reflections(
-                triangles, sun_vec, max_reflections, /*verbose=*/false);
+                ds.triangles(), sun_vec, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::CentroidGPU:
 #ifdef SM3D_HAS_CUDA
-            last_result = calculate_labels_ray_casting_reflections_gpu(
-                triangles, sun_vec, max_reflections, /*verbose=*/false);
+            last_result = parts
+                ? calculate_labels_ray_casting_reflections_gpu_parts(ds, sun_vec, max_reflections, /*verbose=*/false)
+                : calculate_labels_ray_casting_reflections_gpu(ds.triangles(), sun_vec, max_reflections, /*verbose=*/false);
 #else
             throw std::runtime_error("CentroidGPU requires CUDA. Use CentroidCPU or rebuild with CUDA support.");
 #endif
             break;
         case SRPMethod::CentroidRTX:
 #ifdef SM3D_HAS_OPTIX
-            last_result = calculate_labels_ray_casting_rtx(
-                triangles, sun_vec, max_reflections);
+            last_result = parts
+                ? calculate_labels_ray_casting_rtx_parts(ds, sun_vec, max_reflections)
+                : calculate_labels_ray_casting_rtx(ds.triangles(), sun_vec, max_reflections);
 #else
             throw std::runtime_error("CentroidRTX requires OptiX. Use CentroidCPU/CentroidGPU or rebuild with OptiX support.");
 #endif
             break;
         case SRPMethod::PixelGridCPU:
             last_result = calculate_labels_pixel_grid(
-                triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+                ds.triangles(), sun_vec, grid_step, max_reflections, /*verbose=*/false);
             break;
         case SRPMethod::PixelGridGPU:
 #ifdef SM3D_HAS_CUDA
-            last_result = calculate_labels_pixel_grid_gpu(
-                triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+            last_result = parts
+                ? calculate_labels_pixel_grid_gpu_parts(ds, sun_vec, grid_step, max_reflections, /*verbose=*/false)
+                : calculate_labels_pixel_grid_gpu(ds.triangles(), sun_vec, grid_step, max_reflections, /*verbose=*/false);
 #else
             throw std::runtime_error("PixelGridGPU requires CUDA. Use PixelGridCPU or rebuild with CUDA support.");
 #endif
             break;
         case SRPMethod::PixelGridRTX:
 #ifdef SM3D_HAS_OPTIX
-            last_result = calculate_labels_pixel_grid_rtx(
-                triangles, sun_vec, grid_step, max_reflections, /*verbose=*/false);
+            last_result = parts
+                ? calculate_labels_pixel_grid_rtx_parts(ds, sun_vec, grid_step, max_reflections, /*verbose=*/false)
+                : calculate_labels_pixel_grid_rtx(ds.triangles(), sun_vec, grid_step, max_reflections, /*verbose=*/false);
 #else
             throw std::runtime_error("PixelGridRTX requires OptiX. Use PixelGridCPU/PixelGridGPU or rebuild with OptiX support.");
 #endif

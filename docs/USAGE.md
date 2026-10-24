@@ -315,9 +315,10 @@ ds.load("path/to.h5");   // load by path
 ds.reload();             // re-apply current joints without re-reading HDF5
 
 // Geometry access
-const std::vector<Triangle>& tris = ds.triangles();
+const std::vector<Triangle>& tris = ds.triangles();  // body frame, current pose (rebuilt on demand)
 int ntri = ds.triangleCount();
-std::uint64_t ver = ds.geometryVersion();   // changes on every load/reload/articulate
+std::uint64_t ver = ds.geometryVersion();    // changes on every load/reload/articulate
+std::uint64_t sv  = ds.structureVersion();   // changes only when a file is read
 
 // Mass properties (only files with an /inertia group, e.g. SatForm3D output;
 // values are for the pose stored in the file, articulation does not update them)
@@ -337,18 +338,37 @@ ds.printInfo();        // total triangles, area, bounding box
 ds.printComponents();  // table of all components
 ds.printJoints();      // currently active joints
 
-// Articulation — revolute (rotation)
-ds.articulate("SolarPanel_L", JointConfig::rotY(M_PI / 4));  // setJoint + reload
-ds.setJoint("SolarPanel_L",   JointConfig::rotY(M_PI / 4));  // stage only (reload manually)
-ds.reload();                                                   // commit staged joints
+// Joints declared in the file (SatForm3D attributes joint_type, joint_axis,
+// joint_min, joint_max). The file decides which components move: only those
+// declared "revolute" or "prismatic" can be articulated.
+for (const auto& name : ds.movableComponents()) {
+    JointInfo ji = ds.jointInfo(name);   // type, axis (local frame), limits
+}
 
-// Articulation — prismatic (translation)
-ds.articulate("Boom", JointConfig::translateZ(2.5));
+// Articulation with the declared joint: type and axis from the file, pivot at
+// the origin of the component's local frame, value checked against the limits
+ds.setJointValue("SolarArrayGroup_L", 0.7);   // rad (revolute) or m (prismatic), applied at once
 
-// Every method, including the GPU/RTX ones, uses the articulated geometry on
-// the next compute(): the engine compares ds.geometryVersion() with the
-// version held in GPU memory and re-uploads the geometry when it changed.
-// The re-upload (BVH build + copy to the GPU) is paid once per change.
+// Articulation with an explicit JointConfig (same joint written out)
+ds.articulate("SolarArrayGroup_L", JointConfig::rotX(0.7).atOrigin());  // setJoint + reload
+ds.setJoint("SolarArrayGroup_L",   JointConfig::rotX(0.7).atOrigin());  // stage only
+ds.reload();                                                             // commit staged joints
+ds.articulate("DeployableBoom", JointConfig::translate(0, -1, 0, 1.5));
+
+// Rejected with std::invalid_argument: a component declared fixed, the root,
+// a joint of the other type, a value outside [joint_min, joint_max], an
+// unknown name. An axis not parallel to the declared one is used as given
+// (one warning per component).
+
+// Cost of a pose change. A movable component that is out of the pose stored
+// in the file is a separate rigid part: the GPU/RTX methods keep one
+// acceleration structure per part and a pose change only moves the parts
+// (about 0.6 ms for 800k triangles). A component leaving or returning to its
+// file pose changes the split and costs one rebuild (0.15-0.6 s); a model in
+// the pose of the file is computed exactly as in 1.1.0. articulate() itself
+// only records the joint values: triangles() is rebuilt on its next call (CPU
+// methods and visualisation call it). A reference to the triangle list taken
+// before an articulation shows the old pose until triangles() is called again.
 
 // Joint management
 ds.clearJoint("SolarPanel_L");
@@ -380,7 +400,9 @@ JointConfig::translate(ax, ay, az, dist_m)
 // Pivot control (append to any revolute factory)
 JointConfig::rotZ(angle).atOrigin()             // pivot at (0, 0, 0)  — use for hinge joints
 JointConfig::rotZ(angle).atPivot(x, y, z)       // explicit pivot in local frame
-// default: pivot = auto centroid of the component mesh
+// default: pivot = auto centroid of the component mesh. A joint declared in a
+// SatForm3D file acts at the local origin, so write .atOrigin() for it, or use
+// ds.setJointValue(name, value), which does this for you.
 
 // Examples
 ds.articulate("Panel_L", JointConfig::rotY(M_PI / 2));

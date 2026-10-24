@@ -10,6 +10,7 @@
 #include <numeric>
 #include <sstream>
 #include <atomic>
+#include <cstring>
 
 // HighFive for HDF5 reading
 #include <highfive/highfive.hpp>
@@ -118,17 +119,47 @@ void SatelliteDataset::load(const std::string& file_path) {
     current_file_ = file_path;
     load_h5_into_cache(file_path);   // slow: file read + HDF5 parse, once
     for (const auto& [name, jc] : joints_) validateJoint(name, jc, false);
-    structure_version_ = next_geometry_version();
-    buildSceneStructure();
+    resetRigidParts();
     commitJoints(joints_);
     rebuildTriangles(committed_joints_);
     triangles_stale_ = false;
+}
+
+void SatelliteDataset::resetRigidParts() {
+    file_pose_T_ = computeBodyTransforms({});
+    part_active_.assign(cached_nodes_.size(), 0);
+    structure_version_ = 0;   // the next commitJoints() builds the split
 }
 
 void SatelliteDataset::commitJoints(const std::map<std::string, JointConfig>& joints) {
     committed_joints_ = joints;
     geometry_version_ = next_geometry_version();
     triangles_stale_  = true;
+
+    // A movable component is a separate rigid part exactly while its body
+    // transform differs from the pose stored in the file; otherwise it stays
+    // with the fixed body. So the split, and with it every result, depends
+    // only on the current pose, and a model that is not articulated keeps the
+    // single-structure GPU path of 1.1.0. A change of the split rebuilds the
+    // GPU structures once (it happens when a component leaves or returns to
+    // its file pose, not on ordinary pose changes).
+    bool rebuild = (structure_version_ == 0);
+    if (!cached_nodes_.empty()) {
+        const std::vector<Mat4> Tb = computeBodyTransforms(committed_joints_);
+        for (size_t i = 0; i < cached_nodes_.size(); ++i) {
+            const CachedNode& n = cached_nodes_[i];
+            if (n.parent_index < 0 || !n.joint.movable()) continue;
+            const char moved = std::memcmp(Tb[i].data(), file_pose_T_[i].data(), sizeof(Mat4)) != 0;
+            if (moved != part_active_[i]) {
+                part_active_[i] = moved;
+                rebuild = true;
+            }
+        }
+    }
+    if (rebuild) {
+        structure_version_ = next_geometry_version();
+        buildSceneStructure();
+    }
 }
 
 void SatelliteDataset::load(int index) {
@@ -434,8 +465,7 @@ void SatelliteDataset::load_single_file(
     current_file_ = file_path;
     load_h5_into_cache(file_path);
     for (const auto& [name, jc] : jc_overrides) validateJoint(name, jc, false);
-    structure_version_ = next_geometry_version();
-    buildSceneStructure();
+    resetRigidParts();
     commitJoints(jc_overrides);
     rebuildTriangles(committed_joints_);
     triangles_stale_ = false;
@@ -822,7 +852,8 @@ void SatelliteDataset::rebuildTriangles(
 // Rigid parts for the two-level GPU acceleration structures (instance_scene.h)
 //
 // A part is the fixed body or a component declared movable in the file
-// together with its fixed descendants. Vertices are stored in the part frame:
+// and currently out of its file pose (see commitJoints), together with its
+// fixed descendants. Vertices are stored in the part frame:
 // for the body that is the body frame (same arithmetic as rebuildTriangles,
 // so bit-identical), for a movable part the frame of its movable node.
 // =========================================================================
@@ -843,7 +874,7 @@ void SatelliteDataset::buildSceneStructure() {
     for (size_t i = 0; i < nn; ++i) {
         const CachedNode& node = cached_nodes_[i];
         const int p = node.parent_index;
-        if (p >= 0 && node.joint.movable()) {
+        if (p >= 0 && node.joint.movable() && part_active_[i]) {
             owner[i] = static_cast<int>(i);  // own frame
             continue;
         }

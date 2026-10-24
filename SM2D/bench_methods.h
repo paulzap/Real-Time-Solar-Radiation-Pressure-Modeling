@@ -27,6 +27,21 @@ SRPResult calculate_labels_pixel_grid_gpu_bench(
     double grid_step,
     int max_reflections,
     bool verbose = false);
+
+// Two-level variants for files with movable components (gpu_instance_scene.h):
+// one BVH per rigid part, a pose change only moves the parts.
+SRPResult calculate_labels_reflections_gpu_bench_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    int max_reflections,
+    bool verbose = false);
+
+SRPResult calculate_labels_pixel_grid_gpu_bench_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    double grid_step,
+    int max_reflections,
+    bool verbose = false);
 #endif // SM3D_HAS_CUDA
 
 #ifdef SM3D_HAS_OPTIX
@@ -39,6 +54,20 @@ SRPResult calculate_labels_ray_casting_rtx_bench(
 // RTX Pixel Grid (bench): no bounce arrays, lean PTX, double accumulators.
 SRPResult calculate_labels_pixel_grid_rtx_bench(
     const std::vector<Triangle>& triangles,
+    const std::vector<double>& sun_vector,
+    double grid_step,
+    int max_reflections,
+    bool verbose = false);
+
+// Two-level variants for files with movable components: IAS over one GAS per
+// rigid part, a pose change rewrites the instance transforms only.
+SRPResult calculate_labels_ray_casting_rtx_bench_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    int max_reflections);
+
+SRPResult calculate_labels_pixel_grid_rtx_bench_parts(
+    const SatelliteDataset& ds,
     const std::vector<double>& sun_vector,
     double grid_step,
     int max_reflections,

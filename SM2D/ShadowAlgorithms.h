@@ -60,12 +60,27 @@ SRPResult calculate_labels_ray_casting_reflections_gpu(
     int max_reflections,
     bool verbose = true,
     const std::string& primary_emitter_name = "");
+
+// Two-level variant for files with movable components (gpu_instance_scene.h).
+SRPResult calculate_labels_ray_casting_reflections_gpu_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    int max_reflections,
+    bool verbose = true,
+    const std::string& primary_emitter_name = "");
 #endif
 
 #ifdef SM3D_HAS_OPTIX
 // RTX (OptiX hardware) centroid ray casting + multi-bounce reflections.
 SRPResult calculate_labels_ray_casting_rtx(
     const std::vector<Triangle>& triangles,
+    const std::vector<double>& sun_vector,
+    int max_reflections = 0,
+    const std::string& primary_emitter_name = "");
+
+// Two-level variant for files with movable components (IAS over per-part GASes).
+SRPResult calculate_labels_ray_casting_rtx_parts(
+    const SatelliteDataset& ds,
     const std::vector<double>& sun_vector,
     int max_reflections = 0,
     const std::string& primary_emitter_name = "");
@@ -93,11 +108,29 @@ SRPResult calculate_labels_pixel_grid_gpu(
     int max_reflections = 0,
     bool verbose = true,
     const std::string& primary_emitter_name = "");
+
+// Two-level variant for files with movable components (gpu_instance_scene.h).
+SRPResult calculate_labels_pixel_grid_gpu_parts(
+    const SatelliteDataset& ds,
+    const std::vector<double>& sun_vector,
+    double grid_step,
+    int max_reflections = 0,
+    bool verbose = true,
+    const std::string& primary_emitter_name = "");
 #endif
 
 #ifdef SM3D_HAS_OPTIX
 SRPResult calculate_labels_pixel_grid_rtx(
     const std::vector<Triangle>& triangles,
+    const std::vector<double>& sun_vector,
+    double grid_step,
+    int max_reflections = 0,
+    bool verbose = true,
+    const std::string& primary_emitter_name = "");
+
+// Two-level variant for files with movable components (IAS over per-part GASes).
+SRPResult calculate_labels_pixel_grid_rtx_parts(
+    const SatelliteDataset& ds,
     const std::vector<double>& sun_vector,
     double grid_step,
     int max_reflections = 0,

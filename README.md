@@ -18,6 +18,18 @@
 **SolaRT** stands for *Solar radiation pressure on RT cores*; the "RT" is meant
 three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
 
+### What's new in 1.2.0
+
+- **Articulation is cheap.** Rotating or extending a movable component costs
+  about 0.6 ms on every GPU/RTX method instead of rebuilding the geometry
+  (0.05–0.7 s in 1.1.0 for an 840k-triangle model): each movable component out
+  of its file pose has its own acceleration structure and only its transform
+  changes. A model in the pose of the file is computed exactly as in 1.1.0.
+- **The HDF5 file decides what moves.** Joint type, axis and limits are read
+  from the file; `setJointValue(name, value)` applies the declared joint, and
+  articulating a fixed component is an error.
+- Results and visualisation data are unchanged up to single grazing rays.
+
 ### What's new in 1.1.0
 
 - **Articulation on the GPU is fixed.** In 1.0.0 the GPU and RTX methods kept
