@@ -25,6 +25,7 @@ darker.
 
 import argparse
 import base64
+import gzip
 import json
 import os
 import sys
@@ -48,7 +49,9 @@ def read_recording(folder):
 
 
 def b64(a):
-    return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode('ascii')
+    """gzip, then base64: the page unpacks it with the browser's own DecompressionStream."""
+    raw = np.ascontiguousarray(a).tobytes()
+    return base64.b64encode(gzip.compress(raw, compresslevel=6, mtime=0)).decode('ascii')
 
 
 def scene_bounds(geometry, meshes, frames):
@@ -148,21 +151,27 @@ PAGE = r"""<!doctype html>
 <script>const META = __META__;</script>
 <script>
 'use strict';
+(async function () {
+const info = document.getElementById('info');
 const canvas = document.getElementById('gl');
 const gl = canvas.getContext('webgl2', { antialias: true });
-if (!gl) { document.getElementById('info').textContent = 'WebGL 2 is not available in this browser.'; throw 0; }
+if (!gl) { info.textContent = 'WebGL 2 is not available in this browser.'; return; }
+if (typeof DecompressionStream === 'undefined') {
+  info.textContent = 'This browser cannot unpack the data: use a current Chrome, Edge or Firefox.'; return;
+}
+info.textContent = 'Loading ' + META.N + ' triangles, ' + META.F + ' frames...';
 
-function bytes(id) {
-  const node = document.getElementById(id), s = atob(node.textContent.trim());
-  const u = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+// base64 + gzip -> ArrayBuffer, decoded by the browser itself
+async function bytes(id) {
+  const node = document.getElementById(id);
+  const res = await fetch('data:application/octet-stream;base64,' + node.textContent.trim());
   node.textContent = '';
-  return u.buffer;
+  return new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 }
 const N = META.N, F = META.F, M = META.meshes.length, B = Math.ceil(N / 8);
-const geo = new Uint16Array(bytes('geo'));
-const mot = new Float32Array(bytes('mot'));
-const lab = new Uint8Array(bytes('lab'));
+const geo = new Uint16Array(await bytes('geo'));
+const mot = new Float32Array(await bytes('mot'));
+const lab = new Uint8Array(await bytes('lab'));
 
 // ---- shaders -------------------------------------------------------------
 function program(vs, fs) {
@@ -411,6 +420,8 @@ window.addEventListener('keydown', e => {
 window.addEventListener('resize', draw);
 setFrame(0);
 requestAnimationFrame(tick);
+window.player = { setFrame, draw, gl, N, F };   // for checks from the browser console
+})().catch(e => { document.getElementById('info').textContent = 'Cannot show the animation: ' + e; });
 </script>
 </body></html>
 """

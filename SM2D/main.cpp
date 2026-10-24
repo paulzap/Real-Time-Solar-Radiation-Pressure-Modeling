@@ -987,6 +987,10 @@ static SunTracker probeTracker(SatelliteDataset& ds, const std::string& name)
     ds.reload();
 
     const std::vector<Triangle>& tris = ds.triangles();   // file pose
+    int moving = 0;
+    for (size_t k = 0; k < m1.size(); ++k)
+        if (m1[k].motion != m2[k].motion) moving += m1[k].triangle_count;
+    const int stride = std::max(1, moving / 50000);       // enough faces to choose the angle
     bool have_axis = false;
     for (size_t k = 0; k < m1.size(); ++k) {
         if (m1[k].motion == m2[k].motion) continue;        // not turned by this joint
@@ -1004,7 +1008,7 @@ static SunTracker probeTracker(SatelliteDataset& ds, const std::string& name)
             t.axis = a;
             have_axis = true;
         }
-        for (int i = m1[k].first_triangle; i < m1[k].first_triangle + m1[k].triangle_count; ++i)
+        for (int i = m1[k].first_triangle; i < m1[k].first_triangle + m1[k].triangle_count; i += stride)
             t.faces.push_back({ tris[i].normal_x, tris[i].normal_y, tris[i].normal_z, tris[i].area });
     }
     return t;
@@ -1099,7 +1103,7 @@ static void section17_animation(SRPEngine& engine)
     for (const auto& t : trackers)
         std::cout << "    follow  " << std::left << std::setw(40) << t.name << "axis ("
                   << clean(t.axis[0]) << ", " << clean(t.axis[1]) << ", " << clean(t.axis[2])
-                  << "), " << t.faces.size() << " triangles\n";
+                  << "), angle chosen on " << t.faces.size() << " triangles\n";
     for (const auto& s : swing)
         std::cout << "    swing   " << std::left << std::setw(40) << s.first
                   << "amplitude " << s.second[1] << " rad\n";
@@ -1172,6 +1176,7 @@ static void section17_animation(SRPEngine& engine)
         if (deploying) note << "deployment " << 100.0 * w << "%";
         else           note << "sun " << 360.0 * orbit << " deg round the satellite";
         if (!trackers.empty()) note << ", array " << trackers[0].value * 180.0 / M_PI << " deg";
+        note << std::setprecision(ms.back() < 10.0 ? 2 : 0) << ", computed in " << ms.back() << " ms";
         rec.addFrame(engine, r, f * kFrameTime, note.str());
     }
     rec.finish();

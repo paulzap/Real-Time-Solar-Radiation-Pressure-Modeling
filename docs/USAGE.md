@@ -768,9 +768,10 @@ sun going once round the satellite, solar arrays following it).
 
 The page stores the geometry once (16-bit coordinates over the model's
 bounding box) and, per frame, the motion of every mesh and one bit per
-triangle: `satellite_62` (842 662 triangles) with 200 frames gives a 49 MB page
-that changes frames in about 6 ms; small models give 1–2 MB. For long
-recordings of large models use `--every`.
+triangle, all gzip-compressed and unpacked by the browser itself (a current
+Chrome, Edge or Firefox): `satellite_62` (842 662 triangles) with 200 frames
+gives a 4.5 MB page that changes frames in about 6 ms; small models give
+0.1–0.2 MB. For long recordings of large models use `--every`.
 
 **Recording format** (version 1, little-endian), three files in the folder:
 
