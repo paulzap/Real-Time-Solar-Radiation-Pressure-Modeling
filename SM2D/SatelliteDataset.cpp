@@ -1,4 +1,5 @@
 #include "SatelliteDataset.h"
+#include "instance_scene.h"
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
@@ -30,10 +31,26 @@ SatelliteDataset::SatelliteDataset(const std::string& folder_path) {
     scanFolder(folder_path);
 }
 
+SatelliteDataset::SceneHolder::SceneHolder() : p_(std::make_unique<InstanceScene>()) {}
+SatelliteDataset::SceneHolder::~SceneHolder() = default;
+SatelliteDataset::SceneHolder::SceneHolder(const SceneHolder& o)
+    : p_(std::make_unique<InstanceScene>(*o.p_)) {}
+SatelliteDataset::SceneHolder& SatelliteDataset::SceneHolder::operator=(const SceneHolder& o) {
+    if (this != &o) *p_ = *o.p_;
+    return *this;
+}
+SatelliteDataset::SceneHolder::SceneHolder(SceneHolder&& o) noexcept
+    : p_(std::make_unique<InstanceScene>(std::move(*o.p_))) {}
+SatelliteDataset::SceneHolder& SatelliteDataset::SceneHolder::operator=(SceneHolder&& o) noexcept {
+    if (this != &o) *p_ = std::move(*o.p_);
+    return *this;
+}
+
 // =========================================================================
 // Geometry version and mass properties
 // =========================================================================
-std::uint64_t SatelliteDataset::geometryVersion() const { return geometry_version_; }
+std::uint64_t SatelliteDataset::geometryVersion()  const { return geometry_version_; }
+std::uint64_t SatelliteDataset::structureVersion() const { return structure_version_; }
 
 bool SatelliteDataset::hasMassProperties() const { return has_mass_; }
 
@@ -92,15 +109,26 @@ std::string SatelliteDataset::currentFile() const {
 // load(index) : convenience overload
 // reload()    : re-apply joints to cached_nodes_ WITHOUT re-reading HDF5
 //
-// The cache is invalidated only when the current file changes - articulation
-// (setJoint + reload) is then a pure-CPU operation costing matrix math only,
-// not file I/O. For a 750k-triangle satellite this drops reload() from
-// ~1.5 s (file read) to ~30 ms (transform application).
+// The cache is invalidated only when the current file changes. Articulation
+// (setJoint + reload) only commits the joint values: the triangle list is
+// rebuilt when triangles() is next called, and the GPU methods move the rigid
+// parts of the model without the list at all.
 // =========================================================================
 void SatelliteDataset::load(const std::string& file_path) {
     current_file_ = file_path;
     load_h5_into_cache(file_path);   // slow: file read + HDF5 parse, once
-    rebuildTriangles(joints_);       // fast: apply joints to cached nodes
+    for (const auto& [name, jc] : joints_) validateJoint(name, jc, false);
+    structure_version_ = next_geometry_version();
+    buildSceneStructure();
+    commitJoints(joints_);
+    rebuildTriangles(committed_joints_);
+    triangles_stale_ = false;
+}
+
+void SatelliteDataset::commitJoints(const std::map<std::string, JointConfig>& joints) {
+    committed_joints_ = joints;
+    geometry_version_ = next_geometry_version();
+    triangles_stale_  = true;
 }
 
 void SatelliteDataset::load(int index) {
@@ -113,15 +141,20 @@ void SatelliteDataset::reload() {
     if (current_file_.empty()) return;
     if (cached_nodes_.empty()) {
         // Cache was never populated for this file - fall back to a full load.
-        load_h5_into_cache(current_file_);
+        load(current_file_);
+        return;
     }
-    rebuildTriangles(joints_);       // fast: no file I/O
+    commitJoints(joints_);           // geometry follows on demand
 }
 
 // =========================================================================
 // Triangle access
 // =========================================================================
 const std::vector<Triangle>& SatelliteDataset::triangles() const {
+    if (triangles_stale_) {
+        rebuildTriangles(committed_joints_);
+        triangles_stale_ = false;
+    }
     return triangles_;
 }
 
@@ -134,7 +167,7 @@ int SatelliteDataset::triangleCount() const {
 // =========================================================================
 std::vector<std::string> SatelliteDataset::componentNames() const {
     std::vector<std::string> names;
-    for (const auto& t : triangles_) {
+    for (const auto& t : triangles()) {
         if (std::find(names.begin(), names.end(), t.component_name) == names.end())
             names.push_back(t.component_name);
     }
@@ -145,7 +178,7 @@ std::vector<SatelliteDataset::ComponentInfo> SatelliteDataset::componentInfos() 
     std::vector<std::string> order;
     std::map<std::string, ComponentInfo> info_map;
 
-    for (const auto& t : triangles_) {
+    for (const auto& t : triangles()) {
         auto it = info_map.find(t.component_name);
         if (it == info_map.end()) {
             ComponentInfo ci;
@@ -169,7 +202,7 @@ std::vector<SatelliteDataset::ComponentInfo> SatelliteDataset::componentInfos() 
 }
 
 bool SatelliteDataset::hasComponent(const std::string& name) const {
-    for (const auto& t : triangles_)
+    for (const auto& t : triangles())
         if (t.component_name == name) return true;
     return false;
 }
@@ -177,7 +210,7 @@ bool SatelliteDataset::hasComponent(const std::string& name) const {
 std::vector<const Triangle*>
 SatelliteDataset::componentTriangles(const std::string& name) const {
     std::vector<const Triangle*> result;
-    for (const auto& t : triangles_)
+    for (const auto& t : triangles())
         if (t.component_name == name) result.push_back(&t);
     return result;
 }
@@ -186,6 +219,7 @@ SatelliteDataset::componentTriangles(const std::string& name) const {
 // Articulation - general joints
 // =========================================================================
 void SatelliteDataset::setJoint(const std::string& name, const JointConfig& jc) {
+    if (!cached_nodes_.empty()) validateJoint(name, jc, true);
     joints_[name] = jc;
 }
 
@@ -213,6 +247,88 @@ const std::map<std::string, JointConfig>& SatelliteDataset::joints() const {
 void SatelliteDataset::articulate(const std::string& name, const JointConfig& jc) {
     setJoint(name, jc);
     reload();
+}
+
+// =========================================================================
+// Declared joints (HDF5 attributes joint_type, joint_axis, joint_min,
+// joint_max, joint_default_value)
+// =========================================================================
+std::vector<std::string> SatelliteDataset::movableComponents() const {
+    std::vector<std::string> names;
+    for (const auto& n : cached_nodes_)
+        if (n.parent_index >= 0 && n.joint.movable()) names.push_back(n.name);
+    return names;
+}
+
+JointInfo SatelliteDataset::jointInfo(const std::string& name) const {
+    for (const auto& n : cached_nodes_)
+        if (n.name == name) return n.joint;
+    throw std::invalid_argument("SatelliteDataset: no component '" + name + "' in " + current_file_);
+}
+
+void SatelliteDataset::setJointValue(const std::string& name, double value) {
+    const JointInfo ji = jointInfo(name);
+    JointConfig jc;
+    jc.type  = (ji.type == "prismatic") ? JointConfig::Type::PRISMATIC : JointConfig::Type::REVOLUTE;
+    jc.ax    = ji.axis[0];
+    jc.ay    = ji.axis[1];
+    jc.az    = ji.axis[2];
+    jc.value = value;
+    articulate(name, jc.atOrigin());   // validateJoint rejects fixed components
+}
+
+void SatelliteDataset::validateJoint(const std::string& name, const JointConfig& jc,
+                                     bool unknown_is_error) const {
+    bool found = false;
+    for (const auto& n : cached_nodes_) {
+        if (n.name != name) continue;
+        found = true;
+        const bool revolute = jc.type == JointConfig::Type::REVOLUTE;
+        if (n.parent_index < 0 || !n.joint.movable()) {
+            std::string movable;
+            for (const auto& m : movableComponents()) movable += (movable.empty() ? "" : ", ") + m;
+            throw std::invalid_argument(
+                "SatelliteDataset: component '" + name + "' is declared " +
+                (n.parent_index < 0 ? std::string("as the root") : "'" + n.joint.type + "'") +
+                " in " + current_file_ + " and cannot be articulated. Movable components: " +
+                (movable.empty() ? "none" : movable));
+        }
+        if (revolute != (n.joint.type == "revolute"))
+            throw std::invalid_argument(
+                "SatelliteDataset: component '" + name + "' is declared '" + n.joint.type +
+                "' in " + current_file_ + ", but a " + (revolute ? "revolute" : "prismatic") +
+                " joint was given");
+
+        // Axis: used as given; a different direction is reported once.
+        const double len = std::sqrt(jc.ax * jc.ax + jc.ay * jc.ay + jc.az * jc.az);
+        const auto& a = n.joint.axis;
+        const double alen = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        double cosang = 0.0;
+        if (len > 1e-12 && alen > 1e-12)
+            cosang = (jc.ax * a[0] + jc.ay * a[1] + jc.az * a[2]) / (len * alen);
+        if (std::fabs(cosang) < 1.0 - 1e-9 && !axis_warned_.count(name)) {
+            axis_warned_[name] = true;
+            std::cerr << "SatelliteDataset: joint axis (" << jc.ax << ", " << jc.ay << ", " << jc.az
+                      << ") given for '" << name << "' is not the declared axis (" << a[0] << ", "
+                      << a[1] << ", " << a[2] << "); using the given axis\n";
+        }
+
+        // Limits, for the value along the declared axis direction.
+        if (n.joint.has_limits) {
+            const double v   = (cosang < 0.0) ? -jc.value : jc.value;
+            const double tol = 1e-9 * std::max({1.0, std::fabs(n.joint.min_value),
+                                                std::fabs(n.joint.max_value)});
+            if (v < n.joint.min_value - tol || v > n.joint.max_value + tol) {
+                std::ostringstream msg;
+                msg << "SatelliteDataset: value " << v << (revolute ? " rad" : " m") << " of '"
+                    << name << "' is outside the declared range [" << n.joint.min_value << ", "
+                    << n.joint.max_value << "] in " << current_file_;
+                throw std::invalid_argument(msg.str());
+            }
+        }
+    }
+    if (!found && unknown_is_error)
+        throw std::invalid_argument("SatelliteDataset: no component '" + name + "' in " + current_file_);
 }
 
 // =========================================================================
@@ -317,11 +433,16 @@ void SatelliteDataset::load_single_file(
 
     current_file_ = file_path;
     load_h5_into_cache(file_path);
-    rebuildTriangles(jc_overrides);
+    for (const auto& [name, jc] : jc_overrides) validateJoint(name, jc, false);
+    structure_version_ = next_geometry_version();
+    buildSceneStructure();
+    commitJoints(jc_overrides);
+    rebuildTriangles(committed_joints_);
+    triangles_stale_ = false;
 }
 
 const std::vector<Triangle>& SatelliteDataset::get_triangles() const {
-    return triangles_;
+    return triangles();
 }
 
 const std::vector<std::string>& SatelliteDataset::get_file_names() const {
@@ -418,8 +539,7 @@ void SatelliteDataset::transformNormal(const Mat4& T,
 //   Translate along axis by value metres.
 // =========================================================================
 SatelliteDataset::Mat4 SatelliteDataset::buildJointTransform(
-        const JointConfig& jc,
-        const std::vector<std::vector<double>>& vertices)
+        const JointConfig& jc, const CachedNode& node)
 {
     if (jc.type == JointConfig::Type::PRISMATIC) {
         double len = std::sqrt(jc.ax*jc.ax + jc.ay*jc.ay + jc.az*jc.az);
@@ -428,13 +548,10 @@ SatelliteDataset::Mat4 SatelliteDataset::buildJointTransform(
         return makeTrans(jc.ax * inv, jc.ay * inv, jc.az * inv);
     }
 
-    // REVOLUTE - determine pivot
+    // REVOLUTE - determine pivot (auto pivot: vertex mean, computed at load)
     double cx = jc.px, cy = jc.py, cz = jc.pz;
-    if (jc.use_auto_pivot && !vertices.empty()) {
-        cx = cy = cz = 0.0;
-        for (const auto& v : vertices) { cx += v[0]; cy += v[1]; cz += v[2]; }
-        double n = static_cast<double>(vertices.size());
-        cx /= n; cy /= n; cz /= n;
+    if (jc.use_auto_pivot && !node.vertices_local.empty()) {
+        cx = node.vertex_mean[0]; cy = node.vertex_mean[1]; cz = node.vertex_mean[2];
     }
 
     return makeRotAxisAroundPoint(jc.ax, jc.ay, jc.az, jc.value, cx, cy, cz);
@@ -531,6 +648,27 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         if (group.hasAttribute("component_type"))
             group.getAttribute("component_type").read(node.component_type);
 
+        // Declared joint. Anything but "revolute" / "prismatic" is fixed.
+        node.joint.name = gname;
+        node.joint.type = "fixed";
+        if (group.hasAttribute("joint_type")) {
+            std::string jt;
+            group.getAttribute("joint_type").read(jt);
+            if (jt == "revolute" || jt == "prismatic") node.joint.type = jt;
+        }
+        if (group.hasAttribute("joint_axis")) {
+            std::vector<double> ax;
+            group.getAttribute("joint_axis").read(ax);
+            if (ax.size() == 3) node.joint.axis = {ax[0], ax[1], ax[2]};
+        }
+        if (group.hasAttribute("joint_min") && group.hasAttribute("joint_max")) {
+            group.getAttribute("joint_min").read(node.joint.min_value);
+            group.getAttribute("joint_max").read(node.joint.max_value);
+            node.joint.has_limits = node.joint.min_value <= node.joint.max_value;
+        }
+        if (group.hasAttribute("joint_default_value"))
+            group.getAttribute("joint_default_value").read(node.joint.default_value);
+
         if (group.exist("mesh")) {
             auto mg = group.getGroup("mesh");
             node.has_mesh = true;
@@ -541,6 +679,13 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
             node.reflectance = readFlatVector(mg.getDataSet("reflectance"));
             node.specularity = readFlatVector(mg.getDataSet("specularity"));
             node.emissivity  = readFlatVector(mg.getDataSet("emissivity"));
+        }
+        if (!node.vertices_local.empty()) {
+            double cx = 0.0, cy = 0.0, cz = 0.0;
+            for (const auto& v : node.vertices_local) { cx += v[0]; cy += v[1]; cz += v[2]; }
+            double n = static_cast<double>(node.vertices_local.size());
+            cx /= n; cy /= n; cz /= n;
+            node.vertex_mean = {cx, cy, cz};
         }
 
         cached_nodes_.push_back(std::move(node));
@@ -570,12 +715,35 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
 // to engine.dataset().articulate() goes through here. For a 750k-triangle
 // satellite the entire rebuild typically costs 20–80 ms (pure CPU math).
 // =========================================================================
+std::vector<SatelliteDataset::Mat4> SatelliteDataset::computeBodyTransforms(
+        const std::map<std::string, JointConfig>& joints) const
+{
+    // T_body for each cached node; index aligns with cached_nodes_.
+    std::vector<Mat4> body_transforms(cached_nodes_.size(), identity4());
+    for (size_t i = 0; i < cached_nodes_.size(); ++i) {
+        const CachedNode& node = cached_nodes_[i];
+
+        // T_local = T_local_offset · T_joint (if a joint is registered for this node).
+        Mat4 T_local = node.T_local_offset;
+        auto it = joints.find(node.name);
+        if (it != joints.end()) {
+            Mat4 T_joint = buildJointTransform(it->second, node);
+            T_local = mul4(T_local, T_joint);
+        }
+
+        // T_body = T_body(parent) · T_local
+        body_transforms[i] = (node.parent_index < 0)
+            ? T_local
+            : mul4(body_transforms[node.parent_index], T_local);
+    }
+    return body_transforms;
+}
+
 void SatelliteDataset::rebuildTriangles(
-        const std::map<std::string, JointConfig>& joint_overrides)
+        const std::map<std::string, JointConfig>& joint_overrides) const
 {
     if (cached_nodes_.empty()) {
         triangles_.clear();
-        geometry_version_ = next_geometry_version();
         return;
     }
 
@@ -595,32 +763,14 @@ void SatelliteDataset::rebuildTriangles(
     const bool first_build = immutable_dirty_ || (triangles_.size() != total_tris);
     triangles_.resize(total_tris);
 
-    // T_body for each cached node; index aligns with cached_nodes_.
-    std::vector<Mat4> body_transforms(cached_nodes_.size(), identity4());
+    const std::vector<Mat4> body_transforms = computeBodyTransforms(joint_overrides);
 
     size_t write_idx = 0;
     for (size_t i = 0; i < cached_nodes_.size(); ++i) {
         const CachedNode& node = cached_nodes_[i];
-
-        // T_local = T_local_offset · T_joint (if a joint is registered for this node).
-        // buildJointTransform internally inspects jc.use_auto_pivot / jc.type and
-        // only reads `vertices` when it computes the auto-pivot centroid; for
-        // PRISMATIC or explicit-pivot joints the reference is ignored.
-        Mat4 T_local = node.T_local_offset;
-        auto it = joint_overrides.find(node.name);
-        if (it != joint_overrides.end()) {
-            Mat4 T_joint = buildJointTransform(it->second, node.vertices_local);
-            T_local = mul4(T_local, T_joint);
-        }
-
-        // T_body = T_body(parent) · T_local
-        Mat4 T_body = (node.parent_index < 0)
-            ? T_local
-            : mul4(body_transforms[node.parent_index], T_local);
-        body_transforms[i] = T_body;
+        const Mat4& T_body = body_transforms[i];
 
         if (!node.has_mesh) continue;
-
         const int M = static_cast<int>(node.tri_indices.size());
 
         for (int t = 0; t < M; ++t) {
@@ -665,6 +815,103 @@ void SatelliteDataset::rebuildTriangles(
         }
     }
 
-    immutable_dirty_  = false;
-    geometry_version_ = next_geometry_version();
+    immutable_dirty_ = false;
+}
+
+// =========================================================================
+// Rigid parts for the two-level GPU acceleration structures (instance_scene.h)
+//
+// A part is the fixed body or a component declared movable in the file
+// together with its fixed descendants. Vertices are stored in the part frame:
+// for the body that is the body frame (same arithmetic as rebuildTriangles,
+// so bit-identical), for a movable part the frame of its movable node.
+// =========================================================================
+static std::array<double, 12> rows3x4(const std::array<double, 16>& M) {
+    std::array<double, 12> r{};
+    for (int k = 0; k < 12; ++k) r[k] = M[k];
+    return r;
+}
+
+void SatelliteDataset::buildSceneStructure() {
+    InstanceScene& s = *scene_;
+    s = InstanceScene{};
+    s.structure_version = structure_version_;
+
+    const size_t nn = cached_nodes_.size();
+    std::vector<int>  owner(nn, -1);         // movable node owning each node, -1 = body
+    std::vector<Mat4> T_part(nn, identity4());
+    for (size_t i = 0; i < nn; ++i) {
+        const CachedNode& node = cached_nodes_[i];
+        const int p = node.parent_index;
+        if (p >= 0 && node.joint.movable()) {
+            owner[i] = static_cast<int>(i);  // own frame
+            continue;
+        }
+        owner[i] = (p < 0) ? -1 : owner[p];
+        // body: no joints on the way, so this is T_body exactly as in rebuildTriangles
+        T_part[i] = (p < 0) ? node.T_local_offset : mul4(T_part[p], node.T_local_offset);
+    }
+
+    size_t total = 0;
+    for (const auto& n : cached_nodes_) if (n.has_mesh) total += n.tri_indices.size();
+    s.N = total;
+    s.tri_instance.resize(total);
+    s.part_vertices.resize(9 * total);
+    s.part_normals.resize(3 * total);
+
+    std::map<int, std::uint32_t> part_of_owner;
+    std::uint32_t g = 0;
+    for (size_t i = 0; i < nn; ++i) {
+        const CachedNode& node = cached_nodes_[i];
+        if (!node.has_mesh || node.tri_indices.empty()) continue;
+        auto it = part_of_owner.find(owner[i]);
+        if (it == part_of_owner.end()) {
+            SceneInstance part;
+            part.node = owner[i];
+            part.T = {1.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0};
+            s.instances.push_back(std::move(part));
+            it = part_of_owner.emplace(owner[i], (std::uint32_t)(s.instances.size() - 1)).first;
+        }
+        SceneInstance& part = s.instances[it->second];
+        const std::uint32_t M = static_cast<std::uint32_t>(node.tri_indices.size());
+        if (!part.first.empty() && part.first.back() + part.count.back() == g) part.count.back() += M;
+        else { part.first.push_back(g); part.count.push_back(M); }
+        part.size += M;
+
+        const Mat4& T = T_part[i];
+        for (std::uint32_t t = 0; t < M; ++t, ++g) {
+            s.tri_instance[g] = it->second;
+            for (int k = 0; k < 3; ++k) {
+                const auto& v = node.vertices_local[node.tri_indices[t][k]];
+                double* o = &s.part_vertices[9 * (size_t)g + 3 * k];
+                transformPoint(T, v[0], v[1], v[2], o[0], o[1], o[2]);
+                if (part.node >= 0) part.node_vertices.insert(part.node_vertices.end(), {v[0], v[1], v[2]});
+            }
+            const auto& nl = node.normals_local[t];
+            double* on = &s.part_normals[3 * (size_t)g];
+            transformNormal(T, nl[0], nl[1], nl[2], on[0], on[1], on[2]);
+            if (part.node >= 0) {
+                part.node_normals.insert(part.node_normals.end(), {nl[0], nl[1], nl[2]});
+                part.tri_node.push_back(static_cast<std::uint32_t>(i));
+            }
+        }
+    }
+    s.node_T.assign(nn, rows3x4(identity4()));
+    scene_pose_version_ = 0;   // transforms are filled by refreshScenePose()
+}
+
+void SatelliteDataset::refreshScenePose() const {
+    InstanceScene& s = *scene_;
+    if (scene_pose_version_ == geometry_version_ && s.structure_version == structure_version_) return;
+    const std::vector<Mat4> Tb = computeBodyTransforms(committed_joints_);
+    for (size_t i = 0; i < Tb.size() && i < s.node_T.size(); ++i) s.node_T[i] = rows3x4(Tb[i]);
+    for (auto& part : s.instances)
+        if (part.node >= 0) part.T = s.node_T[part.node];
+    s.pose_version = geometry_version_;
+    scene_pose_version_ = geometry_version_;
+}
+
+const InstanceScene& SatelliteDataset::instanceScene() const {
+    refreshScenePose();
+    return *scene_;
 }

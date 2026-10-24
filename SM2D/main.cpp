@@ -122,6 +122,48 @@ static SRPResult runMethodViz(SRPEngine& engine, SRPMethod method, const std::st
 }
 
 // =============================================================================
+// Declared joints: the HDF5 file decides which components move (joint_type
+// "revolute" / "prismatic") and about / along which axis.
+// =============================================================================
+
+// First component the loaded file declares with this joint type, or "".
+static std::string firstDeclared(const SatelliteDataset& ds, const std::string& type)
+{
+    for (const auto& name : ds.movableComponents())
+        if (ds.jointInfo(name).type == type) return name;
+    return "";
+}
+
+// Value moved inside the declared limits.
+static double insideLimits(const JointInfo& ji, double v)
+{
+    return ji.has_limits ? std::min(std::max(v, ji.min_value), ji.max_value) : v;
+}
+
+// The declared joint of comp at the given value, as a JointConfig.
+static JointConfig declaredJoint(const SatelliteDataset& ds, const std::string& comp, double v)
+{
+    const JointInfo ji = ds.jointInfo(comp);
+    const auto& a = ji.axis;
+    return ji.type == "prismatic" ? JointConfig::translate(a[0], a[1], a[2], v)
+                                  : JointConfig::rot(a[0], a[1], a[2], v).atOrigin();
+}
+
+static void printDeclared(const SatelliteDataset& ds)
+{
+    code("ds.movableComponents();  ds.jointInfo(name);");
+    const auto names = ds.movableComponents();
+    if (names.empty()) { std::cout << "  (the file declares no movable components)\n"; return; }
+    for (const auto& n : names) {
+        const JointInfo ji = ds.jointInfo(n);
+        std::cout << "    " << std::left << std::setw(28) << n << std::setw(10) << ji.type
+                  << "axis (" << ji.axis[0] << ", " << ji.axis[1] << ", " << ji.axis[2] << ")";
+        if (ji.has_limits) std::cout << "  range [" << ji.min_value << ", " << ji.max_value << "]";
+        std::cout << "\n";
+    }
+}
+
+// =============================================================================
 // Section functions - each is fully standalone
 // =============================================================================
 
@@ -267,7 +309,6 @@ static void section4_revolute_joints(SRPEngine& engine)
     SatelliteDataset& ds = engine.dataset();
     ds.clearAllJoints();
     ds.load(0);
-    auto compNames = ds.componentNames();
 
     std::cout << "\n"
         "  A JOINT describes a single degree of freedom of one satellite component\n"
@@ -281,74 +322,66 @@ static void section4_revolute_joints(SRPEngine& engine)
         "                Example: a telescopic antenna boom extending.\n"
         "                Value   = distance in metres.\n"
         "\n"
-        "  Every joint has:\n"
-        "    axis   (ax, ay, az)  - direction of rotation/translation.\n"
-        "    value                - how much: angle [rad] or distance [m].\n"
-        "    pivot  (REVOLUTE only) - the fixed point the body rotates around.\n"
-        "      default : auto = centroid of the component mesh.\n"
-        "      .atOrigin()     : pivot = (0,0,0), for hinge-mounted parts.\n"
-        "      .atPivot(x,y,z) : explicit point in the component's local frame.\n"
+        "  The HDF5 file declares which components move: joint_type, joint_axis\n"
+        "  (in the component's local frame) and the range joint_min..joint_max.\n"
+        "  Other components are fixed and cannot be articulated.\n"
         "\n"
         "  Workflow:\n"
-        "    ds.setJoint(name, config)  - stage a joint (no geometry change yet).\n"
-        "    ds.reload()                - re-read HDF5 and apply all staged joints.\n"
-        "    ds.articulate(name, config) - setJoint + reload in one call.\n"
-        "\n";
+        "    ds.setJointValue(name, value) - the declared joint, applied at once.\n"
+        "    ds.setJoint(name, config)     - stage a joint (no geometry change yet).\n"
+        "    ds.reload()                   - apply all staged joints.\n"
+        "    ds.articulate(name, config)   - setJoint + reload in one call.\n"
+        "  A declared joint acts at the origin of the local frame: write it as\n"
+        "  JointConfig::rot(axis, angle).atOrigin(). Without .atOrigin() the\n"
+        "  component turns about the centroid of its vertices.\n";
 
-    if (!compNames.empty()) {
-        const std::string& comp = compNames[0];
-        std::cout << "  Demonstrating on component: \"" << comp << "\"\n\n";
+    printDeclared(ds);
+    const std::string comp = firstDeclared(ds, "revolute");
+    if (comp.empty()) { std::cout << "  No revolute joint in this file.\n"; return; }
+    const JointInfo ji = ds.jointInfo(comp);
+    const auto& a = ji.axis;
+    std::cout << "\n  Demonstrating on component: \"" << comp << "\"\n";
 
-        code("ds.setJoint(\"" + comp + "\", JointConfig::rotZ(M_PI/4));  ds.reload();");
-        ds.setJoint(comp, JointConfig::rotZ(M_PI / 4));
-        ds.reload();
-        std::cout << "  rotZ(45 deg): " << ds.triangleCount() << " triangles\n";
+    const double a1 = insideLimits(ji, M_PI / 4);
+    code("ds.setJointValue(\"" + comp + "\", " + std::to_string(a1) + ");");
+    ds.setJointValue(comp, a1);
+    std::cout << "  declared joint at " << a1 * 180.0 / M_PI << " deg: "
+              << ds.triangleCount() << " triangles\n";
 
-        code("ds.setJoint(\"" + comp + "\", JointConfig::rotX(M_PI/6));  ds.reload();");
-        ds.setJoint(comp, JointConfig::rotX(M_PI / 6));
-        ds.reload();
-        std::cout << "  rotX(30 deg): " << ds.triangleCount() << " triangles\n";
+    const double a2 = insideLimits(ji, M_PI / 6);
+    code("ds.setJoint(\"" + comp + "\", JointConfig::rot(axis, " + std::to_string(a2) +
+         ").atOrigin());  ds.reload();");
+    ds.setJoint(comp, JointConfig::rot(a[0], a[1], a[2], a2).atOrigin());
+    ds.reload();
+    std::cout << "  same joint, JointConfig form: " << ds.triangleCount() << " triangles\n";
 
-        code("ds.setJoint(\"" + comp + "\", JointConfig::rotY(-M_PI/3));  ds.reload();");
-        ds.setJoint(comp, JointConfig::rotY(-M_PI / 3));
-        ds.reload();
-        std::cout << "  rotY(-60 deg): " << ds.triangleCount() << " triangles\n";
+    const double a3 = insideLimits(ji, M_PI / 2);
+    code("ds.articulate(\"" + comp + "\", JointConfig::rot(axis, " + std::to_string(a3) +
+         ").atOrigin());  // setJoint+reload");
+    ds.articulate(comp, JointConfig::rot(a[0], a[1], a[2], a3).atOrigin());
+    std::cout << "  articulate: " << ds.triangleCount() << " triangles\n";
 
-        code("ds.setJoint(\"" + comp + "\", JointConfig::rot(1,1,0, M_PI/8));  ds.reload();");
-        ds.setJoint(comp, JointConfig::rot(1, 1, 0, M_PI / 8));
-        ds.reload();
-        std::cout << "  rot(axis=(1,1,0), 22.5 deg): " << ds.triangleCount() << " triangles\n";
-
-        code("ds.articulate(\"" + comp + "\", JointConfig::rotZ(M_PI/2));  // setJoint+reload");
-        ds.articulate(comp, JointConfig::rotZ(M_PI / 2));
-        std::cout << "  articulate rotZ(90 deg): " << ds.triangleCount() << " triangles\n";
-
-        code("ds.articulate(\"" + comp + "\", JointConfig::rotZ(M_PI/2).atOrigin());");
-        ds.articulate(comp, JointConfig::rotZ(M_PI / 2).atOrigin());
-        std::cout << "  rotZ(90 deg).atOrigin(): " << ds.triangleCount() << " triangles\n";
-
-        code("ds.articulate(\"" + comp + "\", JointConfig::rotZ(M_PI/4).atPivot(0.5,0,0));");
-        ds.articulate(comp, JointConfig::rotZ(M_PI / 4).atPivot(0.5, 0.0, 0.0));
-        std::cout << "  rotZ(45 deg).atPivot(0.5,0,0): " << ds.triangleCount() << " triangles\n";
-
-        code("ds.setJointZ(\"" + comp + "\", M_PI/3);  ds.reload();  // legacy Z-only wrapper");
-        ds.setJointZ(comp, M_PI / 3);
-        ds.reload();
-        std::cout << "  setJointZ(60 deg): " << ds.triangleCount() << " triangles\n";
-
-        code("ds.rotateZ(\"" + comp + "\", 0.0);  // legacy: setJointZ(0)+reload = reset");
-        ds.rotateZ(comp, 0.0);
-        std::cout << "  rotateZ(0) - nominal restored: " << ds.triangleCount() << " triangles\n";
-
-        code("ds.getJointZ(\"" + comp + "\");");
-        double cur = ds.getJointZ(comp);
-        std::cout << "  getJointZ = " << std::fixed << std::setprecision(4) << cur << " rad\n";
-
-        code("ds.clearJoint(\"" + comp + "\");  ds.reload();");
-        ds.clearJoint(comp);
-        ds.reload();
-        std::cout << "  clearJoint - nominal: " << ds.triangleCount() << " triangles\n";
+    std::string fixed_comp;
+    const auto movable = ds.movableComponents();
+    for (const auto& n : ds.componentNames())
+        if (std::find(movable.begin(), movable.end(), n) == movable.end()) { fixed_comp = n; break; }
+    if (!fixed_comp.empty()) {
+        code("ds.articulate(\"" + fixed_comp + "\", JointConfig::rotZ(0.1));  // declared fixed");
+        try {
+            ds.articulate(fixed_comp, JointConfig::rotZ(0.1));
+        } catch (const std::invalid_argument& e) {
+            std::cout << "  rejected: " << e.what() << "\n";
+        }
     }
+
+    code("ds.getJoint(\"" + comp + "\");");
+    std::cout << "  getJoint.value = " << std::fixed << std::setprecision(4)
+              << ds.getJoint(comp).value << " rad\n";
+
+    code("ds.clearJoint(\"" + comp + "\");  ds.reload();");
+    ds.clearJoint(comp);
+    ds.reload();
+    std::cout << "  clearJoint - nominal: " << ds.triangleCount() << " triangles\n";
 }
 
 static void section5_prismatic_joints(SRPEngine& engine)
@@ -358,33 +391,27 @@ static void section5_prismatic_joints(SRPEngine& engine)
     SatelliteDataset& ds = engine.dataset();
     ds.clearAllJoints();
     ds.load(0);
-    auto compNames = ds.componentNames();
 
-    if (!compNames.empty()) {
-        const std::string& comp = compNames[0];
-        std::cout << "  Demonstrating on component: \"" << comp << "\"\n\n";
+    const std::string comp = firstDeclared(ds, "prismatic");
+    if (comp.empty()) { std::cout << "  No prismatic joint in this file.\n"; return; }
+    const JointInfo ji = ds.jointInfo(comp);
+    const auto& a = ji.axis;
+    std::cout << "  Demonstrating on component: \"" << comp << "\"\n\n";
 
-        code("ds.articulate(\"" + comp + "\", JointConfig::translateZ(0.25));");
-        ds.articulate(comp, JointConfig::translateZ(0.25));
-        std::cout << "  translateZ(+0.25 m)\n";
+    const double d1 = insideLimits(ji, 0.25);
+    code("ds.setJointValue(\"" + comp + "\", " + std::to_string(d1) + ");");
+    ds.setJointValue(comp, d1);
+    std::cout << "  extended by " << d1 << " m\n";
 
-        code("ds.articulate(\"" + comp + "\", JointConfig::translateX(-0.10));");
-        ds.articulate(comp, JointConfig::translateX(-0.10));
-        std::cout << "  translateX(-0.10 m)\n";
+    const double d2 = insideLimits(ji, 1.0);
+    code("ds.articulate(\"" + comp + "\", JointConfig::translate(axis, " + std::to_string(d2) + "));");
+    ds.articulate(comp, JointConfig::translate(a[0], a[1], a[2], d2));
+    std::cout << "  extended by " << d2 << " m\n";
 
-        code("ds.articulate(\"" + comp + "\", JointConfig::translateY(0.05));");
-        ds.articulate(comp, JointConfig::translateY(0.05));
-        std::cout << "  translateY(+0.05 m)\n";
-
-        code("ds.articulate(\"" + comp + "\", JointConfig::translate(1,0,1, 0.30));");
-        ds.articulate(comp, JointConfig::translate(1, 0, 1, 0.30));
-        std::cout << "  translate(axis=(1,0,1), 0.30 m)\n";
-
-        code("ds.clearJoint(\"" + comp + "\");  ds.reload();");
-        ds.clearJoint(comp);
-        ds.reload();
-        std::cout << "  Cleared - nominal: " << ds.triangleCount() << " triangles\n";
-    }
+    code("ds.clearJoint(\"" + comp + "\");  ds.reload();");
+    ds.clearJoint(comp);
+    ds.reload();
+    std::cout << "  Cleared - nominal: " << ds.triangleCount() << " triangles\n";
 }
 
 static void section6_multiple_joints(SRPEngine& engine)
@@ -394,52 +421,38 @@ static void section6_multiple_joints(SRPEngine& engine)
     SatelliteDataset& ds = engine.dataset();
     ds.clearAllJoints();
     ds.load(0);
-    auto compNames = ds.componentNames();
+    const auto movable = ds.movableComponents();
+    if (movable.empty()) { std::cout << "  The file declares no movable components.\n"; return; }
 
-    if (compNames.size() >= 2) {
-        code("ds.setJoint(\"" + compNames[0] + "\", JointConfig::rotZ(M_PI/4));");
-        ds.setJoint(compNames[0], JointConfig::rotZ(M_PI / 4));
-
-        code("ds.setJoint(\"" + compNames[1] + "\", JointConfig::rotY(M_PI/6).atOrigin());");
-        ds.setJoint(compNames[1], JointConfig::rotY(M_PI / 6).atOrigin());
-
-        code("ds.reload();  // single HDF5 read - both joints applied in one pass");
-        ds.reload();
-        std::cout << "  Two joints applied: " << ds.triangleCount() << " triangles\n";
-
-        code("ds.printJoints();");
-        ds.printJoints();
-
-        code("ds.hasJoint(\"" + compNames[0] + "\");");
-        std::cout << "  hasJoint(\"" << compNames[0] << "\") = "
-                  << (ds.hasJoint(compNames[0]) ? "true" : "false") << "\n";
-
-        code("ds.getJoint(\"" + compNames[0] + "\");");
-        JointConfig jc = ds.getJoint(compNames[0]);
-        std::cout << "  getJoint.value = "
-                  << std::fixed << std::setprecision(4) << jc.value << " rad\n";
-
-        code("ds.joints();  // full map<name, JointConfig>");
-        std::cout << "  All active joints (" << ds.joints().size() << "):\n";
-        for (const auto& [name, cfg] : ds.joints())
-            std::cout << "    " << std::left << std::setw(24) << name
-                      << (cfg.type == JointConfig::Type::REVOLUTE ? "revolute " : "prismatic")
-                      << "  value=" << cfg.value << "\n";
-
-        code("ds.clearAllJoints();  ds.reload();");
-        ds.clearAllJoints();
-        ds.reload();
-        std::cout << "  clearAllJoints - nominal: " << ds.triangleCount() << " triangles\n";
-
-    } else if (!compNames.empty()) {
-        code("ds.setJoint(\"" + compNames[0] + "\", JointConfig::rotZ(M_PI/4));  ds.reload();");
-        ds.setJoint(compNames[0], JointConfig::rotZ(M_PI / 4));
-        ds.reload();
-        ds.printJoints();
-        ds.clearAllJoints();
-        ds.reload();
-        std::cout << "  clearAllJoints - nominal: " << ds.triangleCount() << " triangles\n";
+    for (size_t k = 0; k < movable.size() && k < 2; ++k) {
+        const std::string& comp = movable[k];
+        const JointInfo ji = ds.jointInfo(comp);
+        const double v = insideLimits(ji, ji.type == "prismatic" ? 0.3 : M_PI / 6);
+        code("ds.setJoint(\"" + comp + "\", <declared joint at " + std::to_string(v) + ">);");
+        ds.setJoint(comp, declaredJoint(ds, comp, v));
     }
+    code("ds.reload();  // all staged joints applied in one pass");
+    ds.reload();
+    std::cout << "  Joints applied: " << ds.triangleCount() << " triangles\n";
+
+    code("ds.printJoints();");
+    ds.printJoints();
+
+    code("ds.hasJoint(\"" + movable[0] + "\");");
+    std::cout << "  hasJoint(\"" << movable[0] << "\") = "
+              << (ds.hasJoint(movable[0]) ? "true" : "false") << "\n";
+
+    code("ds.joints();  // full map<name, JointConfig>");
+    std::cout << "  All active joints (" << ds.joints().size() << "):\n";
+    for (const auto& [name, cfg] : ds.joints())
+        std::cout << "    " << std::left << std::setw(24) << name
+                  << (cfg.type == JointConfig::Type::REVOLUTE ? "revolute " : "prismatic")
+                  << "  value=" << cfg.value << "\n";
+
+    code("ds.clearAllJoints();  ds.reload();");
+    ds.clearAllJoints();
+    ds.reload();
+    std::cout << "  clearAllJoints - nominal: " << ds.triangleCount() << " triangles\n";
 }
 
 static void section7_legacy_load(SRPEngine& engine)
@@ -449,17 +462,23 @@ static void section7_legacy_load(SRPEngine& engine)
     SatelliteDataset& ds = engine.dataset();
     ds.clearAllJoints();
     ds.load(0);
-    auto compNames = ds.componentNames();
 
-    if (!compNames.empty()) {
-        code("ds.load_single_file(path, {{\"" + compNames[0] + "\", M_PI/3}});");
+    // The legacy overrides are rotations about z: only for joints declared about z.
+    std::string comp;
+    for (const auto& n : ds.movableComponents()) {
+        const JointInfo ji = ds.jointInfo(n);
+        if (ji.type == "revolute" && std::fabs(std::fabs(ji.axis[2]) - 1.0) < 1e-12) { comp = n; break; }
+    }
+    if (!comp.empty()) {
+        const double v = insideLimits(ds.jointInfo(comp), M_PI / 3.0);
+        code("ds.load_single_file(path, {{\"" + comp + "\", " + std::to_string(v) + "}});");
         std::map<std::string, double> overrides;
-        overrides[compNames[0]] = M_PI / 3.0;
+        overrides[comp] = v;
         ds.load_single_file(ds.fileNames()[0], overrides);
-        std::cout << "  Z-override 60 deg on \"" << compNames[0]
+        std::cout << "  Z-override on \"" << comp
                   << "\": " << ds.get_triangles().size() << " triangles\n";
     } else {
-        code("ds.load_single_file(path);");
+        code("ds.load_single_file(path);  // no joint declared about z in this file");
         ds.load_single_file(ds.fileNames()[0]);
         std::cout << "  " << ds.get_triangles().size() << " triangles\n";
     }
@@ -751,12 +770,14 @@ static void section12_articulate_recompute(SRPEngine& engine)
     ds.load(0);
     engine.setSunDirection(0.5, 0.7, 0.5);
     engine.setMaxReflections(0);
-    auto compNames = ds.componentNames();
+    const std::string comp = firstDeclared(ds, "revolute");
 
-    if (!compNames.empty()) {
-        code("ds.articulate(\"" + compNames[0] + "\", JointConfig::rotZ(M_PI/2));");
-        ds.articulate(compNames[0], JointConfig::rotZ(M_PI / 2));
-        std::cout << "  Component \"" << compNames[0] << "\" rotated 90 deg around Z.\n";
+    if (!comp.empty()) {
+        const double v = insideLimits(ds.jointInfo(comp), M_PI / 2);
+        code("ds.setJointValue(\"" + comp + "\", " + std::to_string(v) + ");");
+        ds.setJointValue(comp, v);
+        std::cout << "  Component \"" << comp << "\" turned by " << v * 180.0 / M_PI
+                  << " deg about its declared axis.\n";
 
         code("engine.compute(SRPMethod::CentroidRTX);  // rotated geometry");
         SRPResult after = engine.compute(SRPMethod::CentroidRTX);

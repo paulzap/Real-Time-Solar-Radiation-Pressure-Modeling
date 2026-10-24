@@ -163,6 +163,28 @@ struct JointConfig {
 };
 
 // =============================================================================
+// JointInfo - a joint as declared in the HDF5 file (SatForm3D attributes
+// joint_type, joint_axis, joint_min, joint_max, joint_default_value).
+//
+// The file decides which components move: only components declared
+// "revolute" or "prismatic" can be articulated. A declared joint acts at the
+// origin of the component's local frame, about / along joint_axis given in
+// that frame (SatForm3D: T_body = T_body(parent) * T_local_offset * T_joint).
+// =============================================================================
+struct JointInfo {
+    std::string           name;
+    std::string           type;              // "revolute", "prismatic" or "fixed"
+    std::array<double, 3> axis{0.0, 0.0, 1.0};
+    bool                  has_limits = false;
+    double                min_value  = 0.0;  // rad (revolute) or m (prismatic)
+    double                max_value  = 0.0;
+    double                default_value = 0.0;
+    bool movable() const { return type == "revolute" || type == "prismatic"; }
+};
+
+struct InstanceScene;   // internal: the model split into rigid parts for the GPU
+
+// =============================================================================
 // SatelliteDataset - HDF5 satellite geometry loader with scene-graph
 // transforms and general articulation support.
 //
@@ -199,6 +221,10 @@ public:
     void reload();
 
     // ---- Triangle access ------------------------------------------------
+    // Body-frame triangles for the current pose. After an articulation the
+    // list is recomputed on the first call (about 30 ms for 800k triangles);
+    // a reference obtained before the articulation shows the old pose until
+    // triangles() is called again. The GPU/RTX methods do not need the list.
     const std::vector<Triangle>& triangles()     const;
     int                          triangleCount() const;
 
@@ -215,6 +241,11 @@ public:
     std::vector<const Triangle*> componentTriangles(const std::string& name) const;
 
     // ---- Articulation - general joints ----------------------------------
+    // setJoint / articulate accept only components that the loaded file
+    // declares "revolute" or "prismatic", with the same joint type and a value
+    // inside [joint_min, joint_max]; anything else throws std::invalid_argument.
+    // An axis not parallel to the declared one is used as given, with a
+    // warning. Joints staged before a file is loaded are checked by load().
     void        setJoint(const std::string& component_name, const JointConfig& jc);
     void        clearJoint(const std::string& component_name);
     void        clearAllJoints();
@@ -223,13 +254,28 @@ public:
     const std::map<std::string, JointConfig>& joints() const;
     void        articulate(const std::string& component_name, const JointConfig& jc);
 
+    // ---- Declared joints (from the HDF5 file) ----------------------------
+    // setJointValue applies the declared joint: type and axis from the file,
+    // pivot at the origin of the component's local frame, value checked
+    // against the declared limits (rad or m). Takes effect immediately.
+    void                     setJointValue(const std::string& component_name, double value);
+    std::vector<std::string> movableComponents() const;   // file order
+    JointInfo                jointInfo(const std::string& component_name) const;
+
     // ---- Geometry version -----------------------------------------------
     // Identifier of the current triangle set. It changes on every load(),
     // reload(), articulate() and load_single_file(), and is unique across all
     // SatelliteDataset objects in the process. SRPEngine compares it with the
-    // version currently held in GPU memory and re-uploads the geometry when
+    // version currently held in GPU memory and updates the geometry when
     // they differ, so articulation is seen by every GPU/RTX method.
-    std::uint64_t geometryVersion() const;
+    // structureVersion() changes only when a file is read: the split into
+    // rigid parts is fixed by the file, joint values only move the parts.
+    std::uint64_t geometryVersion()  const;
+    std::uint64_t structureVersion() const;
+
+    // Internal: the model split into rigid parts for the two-level GPU
+    // acceleration structures (definition in instance_scene.h).
+    const InstanceScene& instanceScene() const;
 
     // ---- Mass properties (optional "/inertia" group of the HDF5 file) ----
     // Written by SatForm3D. The values describe the pose stored in the file;
@@ -267,6 +313,7 @@ private:
         std::string                       component_type;   // HDF5 attribute
         Mat4                              T_local_offset{}; // static pose in parent frame
         int                               parent_index = -1;// index into cached_nodes_ (-1 = root)
+        JointInfo                         joint;            // declared joint (type "fixed" if none)
 
         bool                              has_mesh = false;
         std::vector<std::vector<double>>  vertices_local;   // raw vertices in component local frame
@@ -276,22 +323,47 @@ private:
         std::vector<double>               reflectance;
         std::vector<double>               specularity;
         std::vector<double>               emissivity;
+        std::array<double, 3>             vertex_mean{};    // auto pivot of JointConfig
     };
 
-    std::vector<Triangle>              triangles_;
+    // Copyable owner of the internal InstanceScene (complete type only in
+    // SatelliteDataset.cpp, so the special members are defined there).
+    class SceneHolder {
+    public:
+        SceneHolder();
+        ~SceneHolder();
+        SceneHolder(const SceneHolder&);
+        SceneHolder& operator=(const SceneHolder&);
+        SceneHolder(SceneHolder&&) noexcept;
+        SceneHolder& operator=(SceneHolder&&) noexcept;
+        InstanceScene& operator*() const { return *p_; }
+    private:
+        std::unique_ptr<InstanceScene> p_;
+    };
+
+    // Triangles of the committed pose; rebuilt on demand by triangles().
+    mutable std::vector<Triangle>      triangles_;
+    mutable bool                       triangles_stale_ = false;
     std::vector<std::string>           file_names_;
     std::string                        current_file_;
-    std::map<std::string, JointConfig> joints_;
+    std::map<std::string, JointConfig> joints_;            // staged by setJoint()
+    std::map<std::string, JointConfig> committed_joints_;  // applied by load()/reload()
+    mutable std::map<std::string, bool> axis_warned_;
 
     // Parsed scene graph (filled by load_h5_into_cache, consumed by rebuildTriangles).
     std::vector<CachedNode>            cached_nodes_;
 
-    // Changes on every rebuildTriangles(); see geometryVersion().
-    std::uint64_t                      geometry_version_ = 0;
+    // geometry_version_ changes on every load()/reload(), structure_version_
+    // only when a file is read; see geometryVersion().
+    std::uint64_t                      geometry_version_  = 0;
+    std::uint64_t                      structure_version_ = 0;
     // Set when a new file is read: the next rebuild must refresh the per-
     // triangle optical properties and names even if the triangle count did
     // not change (another file can have the same number of triangles).
-    bool                               immutable_dirty_ = true;
+    mutable bool                       immutable_dirty_ = true;
+
+    SceneHolder                        scene_;
+    mutable std::uint64_t              scene_pose_version_ = 0;
 
     bool                               has_mass_ = false;
     double                             mass_     = 0.0;
@@ -311,16 +383,32 @@ private:
                                 double& ox, double& oy, double& oz);
     static void transformNormal(const Mat4& T, double ix, double iy, double iz,
                                 double& ox, double& oy, double& oz);
-    static Mat4 buildJointTransform(
-        const JointConfig& jc,
-        const std::vector<std::vector<double>>& vertices);
+    static Mat4 buildJointTransform(const JointConfig& jc, const CachedNode& node);
 
     // Read HDF5 file into cached_nodes_ (slow, ~once per file).
     void load_h5_into_cache(const std::string& file_path);
 
-    // Rebuild triangles_ from cached_nodes_ applying current joints_.
-    // Fast: pure matrix math, no file I/O. Called by load() and reload().
-    void rebuildTriangles(const std::map<std::string, JointConfig>& joint_overrides);
+    // Body transform of every cached node for the given joints.
+    std::vector<Mat4> computeBodyTransforms(
+        const std::map<std::string, JointConfig>& joints) const;
+
+    // Rebuild triangles_ from cached_nodes_ applying the given joints.
+    // Pure matrix math, no file I/O. Called by load() and by triangles()
+    // when the committed pose changed.
+    void rebuildTriangles(const std::map<std::string, JointConfig>& joint_overrides) const;
+
+    // Commit joints: new pose version, triangles and GPU scene marked stale.
+    void commitJoints(const std::map<std::string, JointConfig>& joints);
+
+    // Throws std::invalid_argument unless the loaded file declares a matching
+    // movable joint for component_name (see setJoint).
+    void validateJoint(const std::string& component_name, const JointConfig& jc,
+                       bool unknown_is_error) const;
+
+    // Split of the model into rigid parts (once per file) and their current
+    // transforms (on demand, after each committed pose change).
+    void buildSceneStructure();
+    void refreshScenePose() const;
 };
 
 // =============================================================================

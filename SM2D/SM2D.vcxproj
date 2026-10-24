@@ -216,6 +216,7 @@
   <ItemGroup>
     <ClInclude Include="gpu_optix_raytracer.h" />
     <ClInclude Include="gpu_optix_shared_internal.h" />
+    <ClInclude Include="instance_scene.h" />
     <ClInclude Include="bench_methods.h" />
     <ClInclude Include="SatelliteDataset.h" />
     <ClInclude Include="ShadowAlgorithms.h" />
