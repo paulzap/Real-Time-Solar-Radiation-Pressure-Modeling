@@ -267,7 +267,9 @@ engine.setSunDirection(1.0, 0.0, 0.0);  // Sun along +X axis
 // Reflections (inter-surface bounces, default 0)
 engine.setMaxReflections(2);
 
-// Pixel-grid cell size in metres (PixelGrid methods only, default 0.05)
+// Pixel-grid cell size in metres (PixelGrid methods only, default 0.05).
+// Choose it from the size of the model: the default suits models of a few
+// metres and up; a 0.3 m CubeSat needs about 0.001 m (L / 300 is a good start).
 engine.setGridStep(0.02);
 double step = engine.getGridStep();
 
@@ -348,6 +350,14 @@ for (const auto& name : ds.movableComponents()) {
 // Articulation with the declared joint: type and axis from the file, pivot at
 // the origin of the component's local frame, value checked against the limits
 ds.setJointValue("SolarArrayGroup_L", 0.7);   // rad (revolute) or m (prismatic), applied at once
+
+// The pose stored in the file: each joint at joint_value (if recorded) or
+// joint_default_value; clearJoint() / clearAllJoints() + reload() return to it.
+// Coupled joints (SatForm3D 2.3: coupling_driver_path / _ratio / _offset)
+// follow their driver, q = ratio * q_driver + offset clipped to the limits;
+// movableComponents() lists only the drivers, jointInfo() describes both.
+for (const auto& st : ds.deploymentStateNames()) { /* e.g. "deployed", "stowed" */ }
+ds.setDeploymentState("deployed");   // every joint that declares the state
 
 // Articulation with an explicit JointConfig (same joint written out)
 ds.articulate("SolarArrayGroup_L", JointConfig::rotX(0.7).atOrigin());  // setJoint + reload

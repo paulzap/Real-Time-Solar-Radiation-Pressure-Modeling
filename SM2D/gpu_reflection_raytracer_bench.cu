@@ -598,7 +598,9 @@ SRPResult calculate_labels_reflections_gpu_bench(
         REFL_BENCH_CUDA_CHECK(cudaMemcpy(c.d_centers, centers_flat.data(), N*3*sizeof(float),                      cudaMemcpyHostToDevice));
         REFL_BENCH_CUDA_CHECK(cudaMemcpy(c.d_nodes,   nodesDev.data(),  nodes.size()*sizeof(BVHNodeDevReflBench),  cudaMemcpyHostToDevice));
         size_t nodeSize=sizeof(BVHNodeDevReflBench);
-        c.useConstant = (nodes.size()*nodeSize <= 64*1024);
+        // the __constant__ array holds MAX_REFL_BENCH_CONSTANT_NODES nodes (40 KB);
+        // the former test "<= 64 KB" let 1025..1638 nodes overflow it (CUDA error)
+        c.useConstant = (nodes.size() <= MAX_REFL_BENCH_CONSTANT_NODES);
         if (c.useConstant)
             REFL_BENCH_CUDA_CHECK(cudaMemcpyToSymbol(d_refl_bench_constant_nodes, nodesDev.data(), nodes.size()*nodeSize));
 

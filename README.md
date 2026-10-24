@@ -28,6 +28,8 @@ three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
 - **The HDF5 file decides what moves.** Joint type, axis and limits are read
   from the file; `setJointValue(name, value)` applies the declared joint, and
   articulating a fixed component is an error.
+- **SatForm3D 2.3 models**: pose of the file (`joint_value`), coupled joints,
+  deployment states (`setDeploymentState`), shared meshes.
 - Results and visualisation data are unchanged up to single grazing rays.
 
 ### What's new in 1.1.0

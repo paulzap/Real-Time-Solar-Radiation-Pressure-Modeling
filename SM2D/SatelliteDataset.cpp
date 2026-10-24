@@ -146,10 +146,15 @@ void SatelliteDataset::commitJoints(const std::map<std::string, JointConfig>& jo
     bool rebuild = (structure_version_ == 0);
     if (!cached_nodes_.empty()) {
         const std::vector<Mat4> Tb = computeBodyTransforms(committed_joints_);
+        std::vector<char> inside(cached_nodes_.size(), 0);   // below a separate part
         for (size_t i = 0; i < cached_nodes_.size(); ++i) {
             const CachedNode& n = cached_nodes_[i];
-            if (n.parent_index < 0 || !n.joint.movable()) continue;
-            const char moved = std::memcmp(Tb[i].data(), file_pose_T_[i].data(), sizeof(Mat4)) != 0;
+            const int p = n.parent_index;
+            if (p >= 0) inside[i] = inside[p] || part_active_[p];
+            if (p < 0 || !n.joint.movable()) continue;
+            // a movable component below a separate part is separate too
+            const char moved = inside[i] ||
+                std::memcmp(Tb[i].data(), file_pose_T_[i].data(), sizeof(Mat4)) != 0;
             if (moved != part_active_[i]) {
                 part_active_[i] = moved;
                 rebuild = true;
@@ -287,8 +292,38 @@ void SatelliteDataset::articulate(const std::string& name, const JointConfig& jc
 std::vector<std::string> SatelliteDataset::movableComponents() const {
     std::vector<std::string> names;
     for (const auto& n : cached_nodes_)
-        if (n.parent_index >= 0 && n.joint.movable()) names.push_back(n.name);
+        if (n.parent_index >= 0 && n.joint.movable() && n.driver < 0) names.push_back(n.name);
     return names;
+}
+
+std::vector<std::string> SatelliteDataset::deploymentStateNames() const {
+    std::vector<std::string> names;
+    for (const auto& n : cached_nodes_)
+        for (const auto& [state, v] : n.joint.deploy_states)
+            if (std::find(names.begin(), names.end(), state) == names.end()) names.push_back(state);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+void SatelliteDataset::setDeploymentState(const std::string& state) {
+    bool any = false;
+    for (const auto& n : cached_nodes_) {
+        if (n.parent_index < 0 || !n.joint.movable() || n.driver >= 0) continue;
+        auto it = n.joint.deploy_states.find(state);
+        if (it == n.joint.deploy_states.end()) continue;
+        double v = it->second;
+        if (n.joint.has_limits) v = std::min(std::max(v, n.joint.min_value), n.joint.max_value);
+        setJoint(n.name, declaredJoint(n.joint, v));
+        any = true;
+    }
+    if (!any) {
+        std::string known;
+        for (const auto& k : deploymentStateNames()) known += (known.empty() ? "" : ", ") + k;
+        throw std::invalid_argument("SatelliteDataset: no component of " + current_file_ +
+                                    " declares the deployment state '" + state + "' (declared: " +
+                                    (known.empty() ? "none" : known) + ")");
+    }
+    reload();
 }
 
 JointInfo SatelliteDataset::jointInfo(const std::string& name) const {
@@ -298,14 +333,7 @@ JointInfo SatelliteDataset::jointInfo(const std::string& name) const {
 }
 
 void SatelliteDataset::setJointValue(const std::string& name, double value) {
-    const JointInfo ji = jointInfo(name);
-    JointConfig jc;
-    jc.type  = (ji.type == "prismatic") ? JointConfig::Type::PRISMATIC : JointConfig::Type::REVOLUTE;
-    jc.ax    = ji.axis[0];
-    jc.ay    = ji.axis[1];
-    jc.az    = ji.axis[2];
-    jc.value = value;
-    articulate(name, jc.atOrigin());   // validateJoint rejects fixed components
+    articulate(name, declaredJoint(jointInfo(name), value));   // validateJoint rejects fixed and driven components
 }
 
 void SatelliteDataset::validateJoint(const std::string& name, const JointConfig& jc,
@@ -323,6 +351,13 @@ void SatelliteDataset::validateJoint(const std::string& name, const JointConfig&
                 (n.parent_index < 0 ? std::string("as the root") : "'" + n.joint.type + "'") +
                 " in " + current_file_ + " and cannot be articulated. Movable components: " +
                 (movable.empty() ? "none" : movable));
+        }
+        if (n.driver >= 0) {
+            std::ostringstream msg;
+            msg << "SatelliteDataset: component '" << name << "' is driven by '" << n.joint.driver
+                << "' (q = " << n.joint.ratio << " * q_driver + " << n.joint.offset << ") in "
+                << current_file_ << "; articulate '" << n.joint.driver << "' instead";
+            throw std::invalid_argument(msg.str());
         }
         if (revolute != (n.joint.type == "revolute"))
             throw std::invalid_argument(
@@ -650,10 +685,15 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         }
     }
 
-    // The root is the first group that is not the mass-properties group.
+    // The root is the first group that is not one of the additive tables of
+    // the format (mass properties, SRP table, symmetry, shared meshes, origin).
+    auto reserved = [](const std::string& n) {
+        return n == "inertia" || n == "lumped_masses" || n == "provenance" ||
+               n == "prototypes" || n == "srp" || n == "symmetry";
+    };
     std::string root_name;
     for (const auto& name : objects)
-        if (name != "inertia" && name != "lumped_masses" && name != "provenance") {
+        if (!reserved(name)) {
             root_name = name;
             break;
         }
@@ -661,8 +701,38 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         throw std::runtime_error("HDF5 file has no geometry root group: " + file_path);
     auto root_group = file.getGroup(root_name);
 
-    std::function<void(const HighFive::Group&, int, const std::string&)> visit;
-    visit = [&](const HighFive::Group& group, int parent_idx, const std::string& gname) {
+    auto read_mesh = [](const HighFive::Group& mg, CachedNode& node) {
+        node.has_mesh = true;
+        mg.getDataSet("vertices").read(node.vertices_local);
+        mg.getDataSet("normals").read(node.normals_local);
+        mg.getDataSet("triangles").read(node.tri_indices);
+        node.areas       = readFlatVector(mg.getDataSet("areas"));
+        node.reflectance = readFlatVector(mg.getDataSet("reflectance"));
+        node.specularity = readFlatVector(mg.getDataSet("specularity"));
+        node.emissivity  = readFlatVector(mg.getDataSet("emissivity"));
+    };
+
+    // Shared meshes (schema 2.1 instancing): /prototypes/<g> with attribute
+    // "key" and a "mesh" subgroup, referenced by a node's "instance_key".
+    std::map<std::string, CachedNode> prototypes;
+    if (file.exist("prototypes")) {
+        auto pg = file.getGroup("prototypes");
+        for (const auto& name : pg.listObjectNames()) {
+            auto g = pg.getGroup(name);
+            if (!g.hasAttribute("key") || !g.exist("mesh")) continue;
+            std::string key;
+            g.getAttribute("key").read(key);
+            CachedNode proto;
+            read_mesh(g.getGroup("mesh"), proto);
+            prototypes.emplace(key, std::move(proto));
+        }
+    }
+
+    std::vector<std::string> paths;          // "/Spacecraft/Bus/..." per cached node
+    std::vector<std::string> driver_paths;   // coupling driver, "" if none
+    std::function<void(const HighFive::Group&, int, const std::string&, const std::string&)> visit;
+    visit = [&](const HighFive::Group& group, int parent_idx, const std::string& gname,
+                const std::string& path) {
         CachedNode node;
         node.name = gname;
         node.parent_index = parent_idx;
@@ -686,29 +756,72 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
             group.getAttribute("joint_type").read(jt);
             if (jt == "revolute" || jt == "prismatic") node.joint.type = jt;
         }
-        if (group.hasAttribute("joint_axis")) {
-            std::vector<double> ax;
-            group.getAttribute("joint_axis").read(ax);
-            if (ax.size() == 3) node.joint.axis = {ax[0], ax[1], ax[2]};
+        std::string driver_path;
+        if (node.joint.movable()) {
+            if (group.hasAttribute("joint_axis")) {
+                std::vector<double> ax;
+                group.getAttribute("joint_axis").read(ax);
+                if (ax.size() == 3) node.joint.axis = {ax[0], ax[1], ax[2]};
+            }
+            if (group.hasAttribute("joint_min") && group.hasAttribute("joint_max")) {
+                group.getAttribute("joint_min").read(node.joint.min_value);
+                group.getAttribute("joint_max").read(node.joint.max_value);
+                node.joint.has_limits = node.joint.min_value <= node.joint.max_value;
+            }
+            if (group.hasAttribute("joint_default_value"))
+                group.getAttribute("joint_default_value").read(node.joint.default_value);
+            // pose stored in the file: joint_value (schema 2.2, written only when it
+            // differs from the default), otherwise the default value
+            node.joint.file_value = node.joint.default_value;
+            if (group.hasAttribute("joint_value"))
+                group.getAttribute("joint_value").read(node.joint.file_value);
+            if (group.hasAttribute("coupling_driver_path")) {
+                group.getAttribute("coupling_driver_path").read(driver_path);
+                if (group.hasAttribute("coupling_ratio"))
+                    group.getAttribute("coupling_ratio").read(node.joint.ratio);
+                if (group.hasAttribute("coupling_offset"))
+                    group.getAttribute("coupling_offset").read(node.joint.offset);
+            }
+            if (group.exist("deploy_states")) {
+                auto dg = group.getGroup("deploy_states");
+                std::vector<std::string> names;
+                std::vector<double> values;
+                if (dg.exist("names") && dg.exist("values")) {
+                    dg.getDataSet("names").read(names);
+                    values = readFlatVector(dg.getDataSet("values"));
+                }
+                for (size_t k = 0; k < names.size() && k < values.size(); ++k)
+                    node.joint.deploy_states[names[k]] = values[k];
+            }
         }
-        if (group.hasAttribute("joint_min") && group.hasAttribute("joint_max")) {
-            group.getAttribute("joint_min").read(node.joint.min_value);
-            group.getAttribute("joint_max").read(node.joint.max_value);
-            node.joint.has_limits = node.joint.min_value <= node.joint.max_value;
-        }
-        if (group.hasAttribute("joint_default_value"))
-            group.getAttribute("joint_default_value").read(node.joint.default_value);
 
-        if (group.exist("mesh")) {
-            auto mg = group.getGroup("mesh");
-            node.has_mesh = true;
-            mg.getDataSet("vertices").read(node.vertices_local);
-            mg.getDataSet("normals").read(node.normals_local);
-            mg.getDataSet("triangles").read(node.tri_indices);
-            node.areas       = readFlatVector(mg.getDataSet("areas"));
-            node.reflectance = readFlatVector(mg.getDataSet("reflectance"));
-            node.specularity = readFlatVector(mg.getDataSet("specularity"));
-            node.emissivity  = readFlatVector(mg.getDataSet("emissivity"));
+        std::string instance_key;
+        if (group.hasAttribute("instance_key"))
+            group.getAttribute("instance_key").read(instance_key);
+        auto proto = instance_key.empty() ? prototypes.end() : prototypes.find(instance_key);
+        if (proto != prototypes.end()) {
+            // shared mesh with this instance's uniform material
+            const CachedNode& pm = proto->second;
+            node.has_mesh       = true;
+            node.vertices_local = pm.vertices_local;
+            node.normals_local  = pm.normals_local;
+            node.tri_indices    = pm.tri_indices;
+            node.areas          = pm.areas;
+            node.reflectance    = pm.reflectance;
+            node.specularity    = pm.specularity;
+            node.emissivity     = pm.emissivity;
+            if (group.hasAttribute("instance_material")) {
+                std::vector<double> mat;
+                group.getAttribute("instance_material").read(mat);
+                if (mat.size() == 3) {
+                    const size_t M = node.tri_indices.size();
+                    node.reflectance.assign(M, mat[0]);
+                    node.specularity.assign(M, mat[1]);
+                    node.emissivity.assign(M, mat[2]);
+                }
+            }
+        } else if (group.exist("mesh")) {
+            read_mesh(group.getGroup("mesh"), node);
         }
         if (!node.vertices_local.empty()) {
             double cx = 0.0, cy = 0.0, cz = 0.0;
@@ -719,17 +832,39 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         }
 
         cached_nodes_.push_back(std::move(node));
+        paths.push_back(path);
+        driver_paths.push_back(driver_path);
         const int my_idx = static_cast<int>(cached_nodes_.size()) - 1;
 
+        // component groups carry joint_type; "mesh", "ports", "deploy_states" do not
         for (const auto& child_name : group.listObjectNames()) {
             if (child_name == "mesh") continue;
             auto child_group = group.getGroup(child_name);
             if (child_group.hasAttribute("joint_type"))
-                visit(child_group, my_idx, child_name);
+                visit(child_group, my_idx, child_name, path + "/" + child_name);
         }
     };
 
-    visit(root_group, -1, root_name);
+    visit(root_group, -1, root_name, "/" + root_name);
+
+    // Couplings: the driver is an ancestor in the generator's tree, so it is
+    // cached before the driven node (computeBodyTransforms relies on that).
+    for (size_t i = 0; i < cached_nodes_.size(); ++i) {
+        if (driver_paths[i].empty()) continue;
+        std::string dp = driver_paths[i];
+        if (dp[0] != '/') dp = "/" + dp;
+        int d = -1;
+        for (size_t k = 0; k < i; ++k)
+            if (paths[k] == dp) { d = static_cast<int>(k); break; }
+        if (d < 0 || !cached_nodes_[d].joint.movable()) {
+            std::cerr << "SatelliteDataset: coupling driver " << driver_paths[i] << " of '"
+                      << cached_nodes_[i].name << "' is not a preceding movable component in "
+                      << file_path << "; coupling ignored\n";
+            continue;
+        }
+        cached_nodes_[i].driver = d;
+        cached_nodes_[i].joint.driver = cached_nodes_[d].name;
+    }
 }
 
 // =========================================================================
@@ -745,20 +880,59 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
 // to engine.dataset().articulate() goes through here. For a 750k-triangle
 // satellite the entire rebuild typically costs 20–80 ms (pure CPU math).
 // =========================================================================
+// The declared joint of a component at value v: type and axis from the file,
+// pivot at the origin of the local frame.
+JointConfig SatelliteDataset::declaredJoint(const JointInfo& J, double v) {
+    JointConfig jc;
+    jc.type  = (J.type == "prismatic") ? JointConfig::Type::PRISMATIC : JointConfig::Type::REVOLUTE;
+    jc.ax    = J.axis[0];
+    jc.ay    = J.axis[1];
+    jc.az    = J.axis[2];
+    jc.value = v;
+    return jc.atOrigin();
+}
+
+// Value of a registered JointConfig along the declared axis (sign flipped for
+// an antiparallel axis); the value itself for any other axis.
+double SatelliteDataset::declaredValue(const JointConfig& jc, const JointInfo& J) {
+    const double len  = std::sqrt(jc.ax * jc.ax + jc.ay * jc.ay + jc.az * jc.az);
+    const double alen = std::sqrt(J.axis[0] * J.axis[0] + J.axis[1] * J.axis[1] + J.axis[2] * J.axis[2]);
+    if (len < 1e-12 || alen < 1e-12) return jc.value;
+    const double c = (jc.ax * J.axis[0] + jc.ay * J.axis[1] + jc.az * J.axis[2]) / (len * alen);
+    return (c < -1.0 + 1e-9) ? -jc.value : jc.value;
+}
+
 std::vector<SatelliteDataset::Mat4> SatelliteDataset::computeBodyTransforms(
         const std::map<std::string, JointConfig>& joints) const
 {
     // T_body for each cached node; index aligns with cached_nodes_.
+    // q[i]: joint value of node i along its declared axis (drives couplings).
     std::vector<Mat4> body_transforms(cached_nodes_.size(), identity4());
+    std::vector<double> q(cached_nodes_.size(), 0.0);
     for (size_t i = 0; i < cached_nodes_.size(); ++i) {
         const CachedNode& node = cached_nodes_[i];
+        const JointInfo& J = node.joint;
 
-        // T_local = T_local_offset · T_joint (if a joint is registered for this node).
+        // T_local = T_local_offset · T_joint. A movable joint takes, in this
+        // order: its driver (q = ratio * q_driver + offset, clipped), a joint
+        // registered with setJoint(), or the value of the pose stored in the
+        // file. A zero value is the identity and is not multiplied in, so files
+        // whose joints sit at zero give the transforms of 1.1.0 bit for bit.
         Mat4 T_local = node.T_local_offset;
         auto it = joints.find(node.name);
-        if (it != joints.end()) {
+        if (node.parent_index >= 0 && J.movable() && node.driver >= 0) {
+            double v = J.ratio * q[node.driver] + J.offset;
+            if (J.has_limits) v = std::min(std::max(v, J.min_value), J.max_value);
+            q[i] = v;
+            if (v != 0.0) T_local = mul4(T_local, buildJointTransform(declaredJoint(J, v), node));
+        } else if (it != joints.end()) {
             Mat4 T_joint = buildJointTransform(it->second, node);
             T_local = mul4(T_local, T_joint);
+            q[i] = declaredValue(it->second, J);
+        } else if (node.parent_index >= 0 && J.movable()) {
+            q[i] = J.file_value;
+            if (J.file_value != 0.0)
+                T_local = mul4(T_local, buildJointTransform(declaredJoint(J, J.file_value), node));
         }
 
         // T_body = T_body(parent) · T_local
@@ -879,8 +1053,10 @@ void SatelliteDataset::buildSceneStructure() {
             continue;
         }
         owner[i] = (p < 0) ? -1 : owner[p];
-        // body: no joints on the way, so this is T_body exactly as in rebuildTriangles
-        T_part[i] = (p < 0) ? node.T_local_offset : mul4(T_part[p], node.T_local_offset);
+        // body: every joint on the way sits at its file pose, so T_body is the
+        // file-pose transform (bit-identical to rebuildTriangles); inside a moving
+        // part only fixed components remain (see commitJoints)
+        T_part[i] = (owner[i] < 0) ? file_pose_T_[i] : mul4(T_part[p], node.T_local_offset);
     }
 
     size_t total = 0;

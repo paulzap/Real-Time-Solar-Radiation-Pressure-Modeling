@@ -37,12 +37,39 @@ Versions follow [Semantic Versioning](https://semver.org/).
   an unknown name throws `std::invalid_argument` (1.1.0 accepted any component).
   An axis not parallel to the declared one is used as given, with a warning.
 
-### Added
+### Added — SatForm3D 2.3 files (HDF5 schema 2.2)
+
+- **The pose of the file**: a joint sits at `joint_value` if the file records
+  one, otherwise at `joint_default_value` (1.1.0 always used zero);
+  `clearJoint()` returns to it.
+- **Coupled joints** (`coupling_driver_path`, `coupling_ratio`,
+  `coupling_offset`): a driven joint follows its driver,
+  q = ratio · q_driver + offset clipped to its limits, as in the generator;
+  articulating a driven joint directly throws. In 1.1.0 the driven links stayed
+  in place when the driver moved — also in earlier SatForm3D files, e.g. the
+  folding wing of `sat_01`…`sat_10` (link1 = −link0, link2 = +link0).
+- **Deployment states** (`deploy_states`): `deploymentStateNames()`,
+  `setDeploymentState(name)`.
+- **Shared meshes** (`/prototypes` with `instance_key`, `instance_material`).
+- The additive tables `srp`, `symmetry`, `prototypes` are never taken for the
+  geometry root.
+- Checked on 100 generator models (all 11 bus shapes, 13 mission regimes,
+  42 part types, 128–31 166 triangles): geometry equal to an independent rebuild
+  by the generator's rules in the file pose, in every deployment state and for
+  random driver values (204 cases, 5e-17 of the model size).
+
+### Added — API
 
 - `SatelliteDataset::setJointValue(name, value)` — the declared joint (type and
   axis from the file, pivot at the origin of the local frame, limits checked),
   applied at once; `jointInfo(name)`, `movableComponents()`, `structureVersion()`;
-  struct `JointInfo`.
+  struct `JointInfo` (also file value, driver, ratio, offset, deployment states).
+
+### Fixed
+
+- `CentroidGPU` crashed on models with 513–819 triangles: the BVH went to
+  constant memory when it was below 64 KB, but the array there holds 1024 nodes
+  (40 KB). Present since 1.0.0; 11 of the 100 SatForm3D 2.3 models hit it.
 
 ### Accuracy
 
@@ -53,7 +80,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
   single rays that graze a triangle edge, which is rounded differently in the
   part frame — at most 5e-6 of the force for `CentroidGPU` with reflections
   and 9e-6 for `PixelGridRTX` (one grid cell), far below each method's own
-  error. Body-frame centroids and normals are bit-identical to `triangles()`.
+  error. In folded poses (a stowed accordion wing) faces seen almost edge-on
+  flip whole strips of grid cells: up to about 50 cells (1e-3 of the force) for
+  the pixel-grid methods, against an error of the method itself of 0.2–0.3 %.
+  Body-frame centroids and normals are bit-identical to `triangles()`.
 
 ## [1.1.0] — 2026-10-23
 

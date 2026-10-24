@@ -164,12 +164,17 @@ struct JointConfig {
 
 // =============================================================================
 // JointInfo - a joint as declared in the HDF5 file (SatForm3D attributes
-// joint_type, joint_axis, joint_min, joint_max, joint_default_value).
+// joint_type, joint_axis, joint_min, joint_max, joint_default_value,
+// joint_value, coupling_driver_path / _ratio / _offset, deploy_states).
 //
 // The file decides which components move: only components declared
 // "revolute" or "prismatic" can be articulated. A declared joint acts at the
 // origin of the component's local frame, about / along joint_axis given in
-// that frame (SatForm3D: T_body = T_body(parent) * T_local_offset * T_joint).
+// that frame (SatForm3D: T_body = T_body(parent) * T_local_offset * T_joint(q)).
+// The pose stored in the file has q = joint_value if present, otherwise
+// joint_default_value. A driven (coupled) joint follows its driver:
+// q = ratio * q_driver + offset, clipped to its own limits; it cannot be
+// articulated directly.
 // =============================================================================
 struct JointInfo {
     std::string           name;
@@ -179,7 +184,13 @@ struct JointInfo {
     double                min_value  = 0.0;  // rad (revolute) or m (prismatic)
     double                max_value  = 0.0;
     double                default_value = 0.0;
+    double                file_value    = 0.0;   // q of the pose stored in the file
+    std::string           driver;                // driving component, "" if none
+    double                ratio  = 1.0;          // q = ratio * q_driver + offset
+    double                offset = 0.0;
+    std::map<std::string, double> deploy_states; // named joint values (e.g. "stowed")
     bool movable() const { return type == "revolute" || type == "prismatic"; }
+    bool driven()  const { return !driver.empty(); }
 };
 
 struct InstanceScene;   // internal: the model split into rigid parts for the GPU
@@ -259,8 +270,17 @@ public:
     // pivot at the origin of the component's local frame, value checked
     // against the declared limits (rad or m). Takes effect immediately.
     void                     setJointValue(const std::string& component_name, double value);
-    std::vector<std::string> movableComponents() const;   // file order
+    // Components that can be articulated, in file order (driven joints follow
+    // their drivers and are not listed; jointInfo() describes them too).
+    std::vector<std::string> movableComponents() const;
     JointInfo                jointInfo(const std::string& component_name) const;
+
+    // ---- Deployment states (SatForm3D "deploy_states") -------------------
+    // setDeploymentState drives every component that declares the state to
+    // its stored value (clipped to the limits); driven joints follow. Other
+    // joints are kept. Takes effect immediately.
+    std::vector<std::string> deploymentStateNames() const;   // sorted
+    void                     setDeploymentState(const std::string& state_name);
 
     // ---- Geometry version -----------------------------------------------
     // Identifier of the current triangle set. It changes on every load(),
@@ -316,6 +336,7 @@ private:
         Mat4                              T_local_offset{}; // static pose in parent frame
         int                               parent_index = -1;// index into cached_nodes_ (-1 = root)
         JointInfo                         joint;            // declared joint (type "fixed" if none)
+        int                               driver = -1;      // index of the driving node, -1 = none
 
         bool                              has_mesh = false;
         std::vector<std::vector<double>>  vertices_local;   // raw vertices in component local frame
@@ -392,6 +413,8 @@ private:
     static void transformNormal(const Mat4& T, double ix, double iy, double iz,
                                 double& ox, double& oy, double& oz);
     static Mat4 buildJointTransform(const JointConfig& jc, const CachedNode& node);
+    static JointConfig declaredJoint(const JointInfo& J, double value);
+    static double      declaredValue(const JointConfig& jc, const JointInfo& J);
 
     // Read HDF5 file into cached_nodes_ (slow, ~once per file).
     void load_h5_into_cache(const std::string& file_path);

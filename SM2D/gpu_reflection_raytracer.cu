@@ -756,8 +756,9 @@ SRPResult calculate_labels_ray_casting_reflections_gpu(
 
         // Constant memory path
         size_t nodeSize = sizeof(BVHNodeDevRefl);
-        size_t constantMemLimit = 64 * 1024;
-        g_refl_cache.useConstant = (nodes.size() * nodeSize <= constantMemLimit);
+        // the __constant__ array holds MAX_REFL_CONSTANT_NODES nodes (40 KB); the
+        // former test against 64 KB let 1025..1638 nodes overflow it (CUDA error)
+        g_refl_cache.useConstant = (nodes.size() <= MAX_REFL_CONSTANT_NODES);
         if (g_refl_cache.useConstant) {
             REFL_CUDA_CHECK(cudaMemcpyToSymbol(d_refl_constant_nodes, nodesDev.data(), nodes.size() * nodeSize));
         }
