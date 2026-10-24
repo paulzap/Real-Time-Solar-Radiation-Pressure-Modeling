@@ -31,7 +31,8 @@ three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
 - **SatForm3D 2.3 models**: pose of the file (`joint_value`), coupled joints,
   deployment states (`setDeploymentState`), shared meshes.
 - **Animation**: `FrameRecorder` records computed frames (moving parts, sun,
-  lit and shadowed triangles), `animate_srp.py` plays them as an HTML page;
+  lit and shadowed triangles, force and moment), `animate_srp.py` plays them
+  as an HTML page in a technical or a space look (stars, the sun far away);
   demo section 17 shows the sun going round a satellite whose arrays follow it.
 - Results and visualisation data are unchanged up to single grazing rays.
 

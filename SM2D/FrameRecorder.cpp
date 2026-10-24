@@ -41,6 +41,9 @@ struct FrameRecorder::Impl {
     std::ofstream frames;
     std::string model;
     std::vector<SatelliteDataset::MeshMotion> meshes;   // names and ranges of the first frame
+    std::vector<std::string> mesh_types;                // HDF5 component_type of each mesh
+    std::array<double, 3> moment_ref{};                 // engine moment reference, first frame
+    double pressure_scale = 1.0;                        // g_srp_phi0, first frame
     int  triangles = 0;
     int  frame_count = 0;
     bool finished = false;
@@ -52,6 +55,9 @@ struct FrameRecorder::Impl {
         // back by the inverse motion of their mesh.
         const std::vector<Triangle>& tris = ds.triangles();
         std::vector<float> v(9 * tris.size());
+        mesh_types.clear();
+        for (const auto& m : meshes)
+            mesh_types.push_back(m.triangle_count ? tris[m.first_triangle].component_type : "");
         for (const auto& m : meshes) {
             const auto& M = m.motion;
             const double a = M[0], b = M[1], c = M[2], d = M[4], e = M[5], f = M[6],
@@ -81,6 +87,7 @@ struct FrameRecorder::Impl {
         std::ofstream s(dir / "scene.json", std::ios::trunc);
         if (!s) throw std::runtime_error("FrameRecorder: cannot write " + (dir / "scene.json").string());
         const size_t record = 19 * sizeof(double) + meshes.size() * 12 * sizeof(float) + triangles;
+        s.precision(17);
         s << "{\n"
           << "  \"format\": \"SolaRT frames\",\n"
           << "  \"format_version\": " << kFormatVersion << ",\n"
@@ -92,9 +99,13 @@ struct FrameRecorder::Impl {
           << "  \"record\": \"time, sun[3], force[3], moment[3], body_to_view[9] as float64; "
              "motion[meshes][12] as float32; label[triangles] as uint8\",\n"
           << "  \"labels\": \"1 = illuminated, 0 = shadowed\",\n"
+          << "  \"pressure_scale\": " << pressure_scale << ",\n"
+          << "  \"moment_reference\": [" << moment_ref[0] << ", " << moment_ref[1] << ", "
+          << moment_ref[2] << "],\n"
           << "  \"meshes\": [\n";
         for (size_t i = 0; i < meshes.size(); ++i)
-            s << "    {\"name\": " << json_string(meshes[i].name) << ", \"first\": "
+            s << "    {\"name\": " << json_string(meshes[i].name) << ", \"type\": "
+              << json_string(i < mesh_types.size() ? mesh_types[i] : "") << ", \"first\": "
               << meshes[i].first_triangle << ", \"count\": " << meshes[i].triangle_count << "}"
               << (i + 1 < meshes.size() ? ",\n" : "\n");
         s << "  ],\n  \"notes\": [";
@@ -129,9 +140,11 @@ void FrameRecorder::addFrame(const SRPEngine& engine, const SRPResult& res, doub
     std::vector<SatelliteDataset::MeshMotion> motions = ds.meshMotions();
 
     if (R.frame_count == 0) {
-        R.model     = ds.currentFile();
-        R.triangles = ds.triangleCount();
-        R.meshes    = motions;
+        R.model          = ds.currentFile();
+        R.triangles      = ds.triangleCount();
+        R.meshes         = motions;
+        R.moment_ref     = engine.getMomentReference();
+        R.pressure_scale = g_srp_phi0;
         R.writeGeometry(ds);
     } else if (ds.currentFile() != R.model || ds.triangleCount() != R.triangles ||
                motions.size() != R.meshes.size()) {

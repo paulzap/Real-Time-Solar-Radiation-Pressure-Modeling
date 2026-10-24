@@ -760,11 +760,28 @@ python animate_srp.py results_3d/anim_sat --every 2 --fps 10 --no-open
 
 `compute()` on the GPU does not return labels (fast path), so record the
 results of `computeViz()`; `addFrame()` throws on a result without labels.
-The last argument rotates the drawing: pass the attitude matrix (body frame to
-the orbital frame, row-major) to see the satellite turn as it flies; the
-identity draws the body frame, where the sun moves round the satellite.
+The last argument is the rotation from the body frame to a "view" frame
+(row-major). The page can draw either frame: **body** (the satellite stands
+still, the sun moves round it) or **view** (the satellite turns as the
+attitude law turns it). The star sky of the space look is fixed in the view
+frame, so pass the attitude body → inertial frame for a true sky.
 Demo section 17 is a complete example with a fixed scenario (deployment, the
-sun going once round the satellite, solar arrays following it).
+sun going once round the satellite, solar arrays following it); it records
+body → inertial for an Earth-pointing satellite, so in the view frame the sun
+stays still and the body turns under the arrays.
+
+On the page:
+
+- **force and moment vectors** (check boxes): arrows from the moment
+  reference point, scaled to the largest value of the recording, drawn over
+  the model; their lengths are in the information line, in m² and m³ per unit
+  pressure when `g_srp_phi0` = 1, otherwise in N and N·m;
+- **look**: *technical* — white background, gold = illuminated, gray =
+  shadowed, body axes, the sun's path; *space* — a star sky with the Milky Way,
+  the sun with its glow and rays far away, and materials guessed from the
+  component types (solar cells, gold foil, white paint, metal); the shadows
+  are still those computed by the library. Command line: `--style space`,
+  `--frame body|view`.
 
 The page stores the geometry once (16-bit coordinates over the model's
 bounding box) and, per frame, the motion of every mesh and one bit per
@@ -777,7 +794,7 @@ gives a 4.5 MB page that changes frames in about 6 ms; small models give
 
 | File | Content |
 |---|---|
-| `scene.json` | `format` = "SolaRT frames", `format_version`, `solart_version`, `model`, `triangles` (N), `frames` (F), `record_bytes`, `meshes` (list of `name`, `first`, `count`: triangle ranges in `triangles()` order), `notes` (one text per frame) |
+| `scene.json` | `format` = "SolaRT frames", `format_version`, `solart_version`, `model`, `triangles` (N), `frames` (F), `record_bytes`, `pressure_scale` (`g_srp_phi0`), `moment_reference` (m, body frame), `meshes` (list of `name`, `type` = HDF5 `component_type`, `first`, `count`: triangle ranges in `triangles()` order), `notes` (one text per frame) |
 | `geometry.bin` | N × 9 float32: vertices of every triangle at the file pose, body frame, m |
 | `frames.bin` | F records of `record_bytes` bytes each |
 

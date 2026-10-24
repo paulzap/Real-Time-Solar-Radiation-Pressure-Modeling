@@ -1177,7 +1177,15 @@ static void section17_animation(SRPEngine& engine)
         else           note << "sun " << 360.0 * orbit << " deg round the satellite";
         if (!trackers.empty()) note << ", array " << trackers[0].value * 180.0 / M_PI << " deg";
         note << std::setprecision(ms.back() < 10.0 ? 2 : 0) << ", computed in " << ms.back() << " ms";
-        rec.addFrame(engine, r, f * kFrameTime, note.str());
+        // Body -> inertial frame: the sun circling the axis a in the body frame
+        // is the body turning the other way about a under a fixed sun (an
+        // Earth-pointing satellite); the player can draw either frame.
+        const double phi = -(theta - theta0), c = std::cos(phi), s = std::sin(phi);
+        const std::array<double, 9> body_to_inertial = {
+            c + (1 - c) * a[0] * a[0],        (1 - c) * a[0] * a[1] - s * a[2], (1 - c) * a[0] * a[2] + s * a[1],
+            (1 - c) * a[1] * a[0] + s * a[2], c + (1 - c) * a[1] * a[1],        (1 - c) * a[1] * a[2] - s * a[0],
+            (1 - c) * a[2] * a[0] - s * a[1], (1 - c) * a[2] * a[1] + s * a[0], c + (1 - c) * a[2] * a[2] };
+        rec.addFrame(engine, r, f * kFrameTime, note.str(), body_to_inertial);
     }
     rec.finish();
     ds.clearAllJoints();

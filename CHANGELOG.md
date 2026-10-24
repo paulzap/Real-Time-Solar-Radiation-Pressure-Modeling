@@ -73,8 +73,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
   self-contained HTML page (WebGL 2, works offline, needs only numpy): the
   geometry is stored once, a frame adds the mesh motions and one bit per
   triangle, gzip-compressed (`satellite_62`, 842 662 triangles, 200 frames:
-  4.5 MB, 6 ms per frame change). Format in `docs/USAGE.md`. For display and
-  visual checking, not for timing.
+  4.5 MB, 6 ms per frame change). Force and moment arrows; two looks —
+  technical (lit / shadowed colours, axes) and space (star sky, the sun with
+  its glow, materials from the component types, the library's shadows); two
+  frames — body or the recording's view frame (e.g. inertial). Format in
+  `docs/USAGE.md`. For display and visual checking, not for timing.
 - `SatelliteDataset::meshMotions()` — every mesh's triangle range and its rigid
   motion from the file pose to the current pose (cheap, no triangle list);
   `SRPEngine::getSunDirection()`.
