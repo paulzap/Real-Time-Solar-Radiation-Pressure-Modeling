@@ -434,6 +434,8 @@ done < <(find "$BUILD_DIR" -name "*.ptx" -print0 2>/dev/null)
 mkdir -p "$DIST_DIR/python"
 cp "$SCRIPT_DIR/SM2D/visualize3d.py" "$DIST_DIR/python/"
 ok "dist/python/visualize3d.py"
+cp "$SCRIPT_DIR/SM2D/animate_srp.py" "$DIST_DIR/python/"
+ok "dist/python/animate_srp.py"
 
 # ── 12. generate SRPLibraryConfig.cmake ─────────────────────────────────────
 HAVE_PYTHON_SUPPORT=OFF

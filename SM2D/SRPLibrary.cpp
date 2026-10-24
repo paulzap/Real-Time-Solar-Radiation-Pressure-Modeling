@@ -469,6 +469,7 @@ double SRPEngine::getGridStep() const      { return pImpl->grid_step; }
 void SRPEngine::setSunDirection(double x, double y, double z) {
     pImpl->setSunDirection(x, y, z);
 }
+std::array<double, 3> SRPEngine::getSunDirection() const { return pImpl->sun_dir; }
 
 void SRPEngine::setMomentReference(double x, double y, double z) {
     pImpl->moment_ref = { x, y, z };

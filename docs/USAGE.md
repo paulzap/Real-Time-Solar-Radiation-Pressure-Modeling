@@ -26,6 +26,7 @@ This guide covers building the library, integrating it into your project, and us
 5. [Code Examples](#5-code-examples)
 6. [Testing Functions](#6-testing-functions)
 7. [Visualization](#7-visualization)
+   - [Animation](#animation)
 
 ---
 
@@ -263,6 +264,7 @@ SRPEngine engine("satellite.h5");        // single file also works
 
 // Sun direction (normalised automatically)
 engine.setSunDirection(1.0, 0.0, 0.0);  // Sun along +X axis
+std::array<double,3> s = engine.getSunDirection();   // unit vector towards the Sun, body frame
 
 // Reflections (inter-surface bounces, default 0)
 engine.setMaxReflections(2);
@@ -386,6 +388,14 @@ ds.clearAllJoints();
 bool has = ds.hasJoint("SolarPanel_L");
 JointConfig jc = ds.getJoint("SolarPanel_L");
 const auto& all = ds.joints();   // std::map<std::string, JointConfig>
+
+// Rigid motion of every mesh from the file pose to the current pose (display,
+// animation; cheap, builds no triangle list). triangles() is the concatenation
+// of the meshes in this order.
+for (const auto& m : ds.meshMotions()) {
+    // m.name, m.first_triangle, m.triangle_count,
+    // m.motion: row-major 3x4 [R | t], p_now = R * p_file + t (identity if not moved)
+}
 ```
 
 ---
@@ -721,6 +731,61 @@ export PYTHONHOME=/usr/local
 ```
 
 Or in VS: **Project → Properties → Debugging → Environment** → add `PYTHONHOME=C:\...\Python312`
+
+### Animation
+
+`FrameRecorder` writes a sequence of computed frames; `SM2D/animate_srp.py`
+(copied next to the demo by CMake) plays it in real time as a self-contained
+HTML page with play / pause, a time slider, a speed choice and a camera that
+turns with the mouse (wheel: zoom, right button: move). The page draws with
+WebGL 2 and works offline; the script needs only Python 3 with `numpy`. It is
+meant for display and visual checking: write frames in a separate run, not in
+runs that measure time.
+
+```cpp
+FrameRecorder rec("results_3d/anim_sat");          // folder, created if needed
+for (int k = 0; k < 200; ++k) {
+    engine.dataset().setJointValue("SolarArrayGroup_L", gamma[k]);   // pose
+    engine.setSunDirection(s[k][0], s[k][1], s[k][2]);               // body frame
+    SRPResult r = engine.computeViz(SRPMethod::CentroidRTX);         // labels needed
+    rec.addFrame(engine, r, t[k], "gamma = ...", A_bo[k]);   // A_bo: body -> view (optional)
+}
+rec.finish();                                       // also done by the destructor
+```
+
+```
+python animate_srp.py results_3d/anim_sat            # writes and opens animation.html
+python animate_srp.py results_3d/anim_sat --every 2 --fps 10 --no-open
+```
+
+`compute()` on the GPU does not return labels (fast path), so record the
+results of `computeViz()`; `addFrame()` throws on a result without labels.
+The last argument rotates the drawing: pass the attitude matrix (body frame to
+the orbital frame, row-major) to see the satellite turn as it flies; the
+identity draws the body frame, where the sun moves round the satellite.
+Demo section 17 is a complete example with a fixed scenario (deployment, the
+sun going once round the satellite, solar arrays following it).
+
+The page stores the geometry once (16-bit coordinates over the model's
+bounding box) and, per frame, the motion of every mesh and one bit per
+triangle: `satellite_62` (842 662 triangles) with 200 frames gives a 49 MB page
+that changes frames in about 6 ms; small models give 1–2 MB. For long
+recordings of large models use `--every`.
+
+**Recording format** (version 1, little-endian), three files in the folder:
+
+| File | Content |
+|---|---|
+| `scene.json` | `format` = "SolaRT frames", `format_version`, `solart_version`, `model`, `triangles` (N), `frames` (F), `record_bytes`, `meshes` (list of `name`, `first`, `count`: triangle ranges in `triangles()` order), `notes` (one text per frame) |
+| `geometry.bin` | N × 9 float32: vertices of every triangle at the file pose, body frame, m |
+| `frames.bin` | F records of `record_bytes` bytes each |
+
+A record: 19 float64 — time, sun direction (3, unit vector towards the sun,
+body frame), force (3), moment (3), body-to-view rotation (9, row-major); then
+M × 12 float32 — the motion of each mesh, row-major 3×4 `[R | t]`,
+`p = R·p_file + t`; then N uint8 — labels (1 illuminated, 0 shadowed). The
+vertices of frame k are `R_m · p_file + t_m` for the mesh m of the triangle,
+then rotated by the body-to-view matrix.
 
 ---
 

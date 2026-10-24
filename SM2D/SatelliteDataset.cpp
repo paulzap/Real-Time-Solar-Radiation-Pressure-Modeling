@@ -1122,3 +1122,41 @@ const InstanceScene& SatelliteDataset::instanceScene() const {
     refreshScenePose();
     return *scene_;
 }
+
+std::vector<SatelliteDataset::MeshMotion> SatelliteDataset::meshMotions() const {
+    std::vector<MeshMotion> out;
+    if (cached_nodes_.empty()) return out;
+    const std::vector<Mat4> Tb = computeBodyTransforms(committed_joints_);
+    int first = 0;
+    for (size_t i = 0; i < cached_nodes_.size(); ++i) {
+        const CachedNode& node = cached_nodes_[i];
+        if (!node.has_mesh) continue;
+        MeshMotion m;
+        m.name           = node.name;
+        m.first_triangle = first;
+        m.triangle_count = static_cast<int>(node.tri_indices.size());
+        first += m.triangle_count;
+        const Mat4& F = file_pose_T_[i];
+        if (std::memcmp(Tb[i].data(), F.data(), sizeof(Mat4)) == 0) {
+            m.motion = { 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0 };
+        } else {
+            // motion = T_body * F^-1, F affine (inverse of its 3x3 block by cofactors)
+            const double a = F[0], b = F[1], c = F[2], d = F[4], e = F[5], f = F[6],
+                         g = F[8], h = F[9], k = F[10];
+            const double det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g);
+            const double Ai[9] = { (e * k - f * h) / det, (c * h - b * k) / det, (b * f - c * e) / det,
+                                   (f * g - d * k) / det, (a * k - c * g) / det, (c * d - a * f) / det,
+                                   (d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det };
+            Mat4 Fi = identity4();
+            for (int r = 0; r < 3; ++r) {
+                for (int col = 0; col < 3; ++col) Fi[r * 4 + col] = Ai[r * 3 + col];
+                Fi[r * 4 + 3] = -(Ai[r * 3] * F[3] + Ai[r * 3 + 1] * F[7] + Ai[r * 3 + 2] * F[11]);
+            }
+            const Mat4 M = mul4(Tb[i], Fi);
+            for (int r = 0; r < 3; ++r)
+                for (int col = 0; col < 4; ++col) m.motion[r * 4 + col] = M[r * 4 + col];
+        }
+        out.push_back(std::move(m));
+    }
+    return out;
+}

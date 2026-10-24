@@ -299,6 +299,21 @@ public:
     // acceleration structures (definition in instance_scene.h).
     const InstanceScene& instanceScene() const;
 
+    // ---- Rigid motions of the meshes (display, animation) ----------------
+    // triangles() is the concatenation of the meshes of the components, in
+    // file order. For every component with a mesh: its name, its range in
+    // triangles() and the motion from the pose stored in the file to the
+    // current pose, row-major 3x4 [R | t]: p_now = R * p_file + t. Meshes at
+    // their file pose get exactly the identity. Cheap (no triangle list is
+    // built), so it can be called on every frame of an animation.
+    struct MeshMotion {
+        std::string            name;
+        int                    first_triangle = 0;
+        int                    triangle_count = 0;
+        std::array<double, 12> motion{};
+    };
+    std::vector<MeshMotion> meshMotions() const;
+
     // ---- Mass properties (optional "/inertia" group of the HDF5 file) ----
     // Written by SatForm3D. The values describe the pose stored in the file;
     // articulation does NOT update them. The accessors throw if the loaded
@@ -592,6 +607,8 @@ public:
 
     // Sun direction - normalised automatically; can be called at any time.
     void setSunDirection(double x, double y, double z);
+    // Unit vector towards the Sun, body frame.
+    std::array<double, 3> getSunDirection() const;
 
     // Moment reference point in the body frame [m]. total_moment of every
     // result is taken about this point:  M_ref = M_origin - r_ref x F.
@@ -629,6 +646,58 @@ public:
     //   show_normals - overlay surface normal arrows
     // Requires Python with matplotlib/plotly in PATH.
     void visualizeLastResult(int every = 1, bool show_normals = false) const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pImpl;
+};
+
+// =============================================================================
+// FrameRecorder - writes a sequence of computed frames for an animation:
+// the pose of every mesh, the sun direction, the illumination labels and the
+// force and moment of each frame. Player: SM2D/animate_srp.py (interactive
+// HTML page); the format is described in docs/USAGE.md, so another program
+// can read it too. For display and visual checking, not for timing.
+//
+//   FrameRecorder rec("results_3d/anim_sat");
+//   for (...) {
+//       engine.dataset().setJointValue("SolarArray_L", gamma);   // pose
+//       engine.setSunDirection(sx, sy, sz);                      // body frame
+//       SRPResult r = engine.computeViz(SRPMethod::CentroidRTX); // with labels
+//       rec.addFrame(engine, r, t, "gamma = 30 deg", attitude);
+//   }
+//   rec.finish();          // python animate_srp.py results_3d/anim_sat
+//
+// The labels are needed: record results of computeViz() (compute() on the
+// GPU skips the labels for speed; CentroidCPU and PixelGridCPU have them).
+//
+// Files in the output folder: scene.json (description, frame notes),
+// geometry.bin (triangles at the file pose), frames.bin (one record per
+// frame). One model per recording.
+// =============================================================================
+class FrameRecorder {
+public:
+    // Creates the folder (and its parents) if needed; existing recording
+    // files in it are replaced.
+    explicit FrameRecorder(const std::string& out_dir);
+    ~FrameRecorder();                    // calls finish(); never throws
+    FrameRecorder(const FrameRecorder&) = delete;
+    FrameRecorder& operator=(const FrameRecorder&) = delete;
+
+    // Record the current pose of engine.dataset(), engine.getSunDirection()
+    // and res (labels, force, moment); throws if res has no labels or
+    // belongs to another model. time: any increasing value, e.g.
+    // seconds; note: a short text the player shows with the frame;
+    // body_to_view: rotation from the body frame to the frame the player
+    // draws in, row-major (e.g. the attitude matrix body -> orbital frame);
+    // the identity draws the body frame.
+    void addFrame(const SRPEngine& engine, const SRPResult& res, double time,
+                  const std::string& note = "",
+                  const std::array<double, 9>& body_to_view = {1, 0, 0, 0, 1, 0, 0, 0, 1});
+
+    int  frameCount() const;
+    // Write scene.json and close the files. Safe to call more than once.
+    void finish();
 
 private:
     struct Impl;

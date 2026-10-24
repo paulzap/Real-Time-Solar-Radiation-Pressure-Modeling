@@ -11,6 +11,7 @@
 #include <string>
 #include <functional>
 #include <cmath>
+#include <cstdlib>
 #ifdef SM3D_HAS_CUDA
 #  include <nvml.h>
 #endif
@@ -937,6 +938,270 @@ static void section16_hardware_info(SRPEngine& /*engine*/)
 }
 
 // =============================================================================
+// Section 17 - animation. A fixed scenario instead of an orbit: the movable
+// parts declared in the file deploy, then the sun goes once round the
+// satellite while the solar arrays follow it and the other joints swing.
+// Every frame is computed and written with FrameRecorder; animate_srp.py
+// turns the recording into an HTML page. For display and visual checking.
+// =============================================================================
+
+// v turned about the unit axis a by phi (right hand).
+static std::array<double, 3> rotateAbout(const std::array<double, 3>& a,
+                                         const std::array<double, 3>& v, double phi)
+{
+    const double c = std::cos(phi), s = std::sin(phi);
+    const double d = a[0] * v[0] + a[1] * v[1] + a[2] * v[2];
+    const std::array<double, 3> x = { a[1] * v[2] - a[2] * v[1],
+                                      a[2] * v[0] - a[0] * v[2],
+                                      a[0] * v[1] - a[1] * v[0] };
+    std::array<double, 3> r;
+    for (int i = 0; i < 3; ++i) r[i] = v[i] * c + x[i] * s + a[i] * d * (1.0 - c);
+    return r;
+}
+
+// A revolute joint that follows the sun: its axis in the body frame and the
+// triangles it turns (normal at the file pose, area).
+struct SunTracker {
+    std::string name;
+    JointInfo   info;
+    double      value = 0.0;
+    std::array<double, 3> axis{};
+    std::vector<std::array<double, 4>> faces;
+};
+
+// Axis and moving triangles of a joint, found from two trial poses with the
+// public API only (meshMotions); the dataset is left at the file pose.
+static SunTracker probeTracker(SatelliteDataset& ds, const std::string& name)
+{
+    SunTracker t;
+    t.name  = name;
+    t.info  = ds.jointInfo(name);
+    t.value = t.info.file_value;
+    const double d  = (!t.info.has_limits || t.value + 0.6 <= t.info.max_value) ? 0.3 : -0.3;
+    const double p1 = t.value + d, p2 = t.value + 2 * d;
+    ds.setJointValue(name, p1);
+    const auto m1 = ds.meshMotions();
+    ds.setJointValue(name, p2);
+    const auto m2 = ds.meshMotions();
+    ds.clearJoint(name);
+    ds.reload();
+
+    const std::vector<Triangle>& tris = ds.triangles();   // file pose
+    bool have_axis = false;
+    for (size_t k = 0; k < m1.size(); ++k) {
+        if (m1[k].motion == m2[k].motion) continue;        // not turned by this joint
+        if (!have_axis) {
+            // R2 * R1^T is the turn by p2 - p1 about the body-frame axis
+            double R[3][3] = {};
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j)
+                    for (int c = 0; c < 3; ++c)
+                        R[i][j] += m2[k].motion[i * 4 + c] * m1[k].motion[j * 4 + c];
+            std::array<double, 3> a = { R[2][1] - R[1][2], R[0][2] - R[2][0], R[1][0] - R[0][1] };
+            const double len = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            const double sgn = (std::sin(p2 - p1) > 0) ? 1.0 : -1.0;
+            for (auto& x : a) x *= sgn / len;
+            t.axis = a;
+            have_axis = true;
+        }
+        for (int i = m1[k].first_triangle; i < m1[k].first_triangle + m1[k].triangle_count; ++i)
+            t.faces.push_back({ tris[i].normal_x, tris[i].normal_y, tris[i].normal_z, tris[i].area });
+    }
+    return t;
+}
+
+// Area of the tracker's triangles facing the sun s when the joint is at gamma.
+static double sunFacingArea(const SunTracker& t, const std::array<double, 3>& s, double gamma)
+{
+    const auto sl = rotateAbout(t.axis, s, -(gamma - t.info.file_value));   // sun seen at the file pose
+    double area = 0.0;
+    for (const auto& f : t.faces) {
+        const double c = f[0] * sl[0] + f[1] * sl[1] + f[2] * sl[2];
+        if (c > 0.0) area += f[3] * c;
+    }
+    return area;
+}
+
+// Joint value turning the most area to the sun, on a 1-degree grid. After the
+// first frame only near the previous value, so the array turns smoothly and
+// does not jump to its other side. A full-turn range wraps; a shorter one
+// stops at its limit and swings back when the far side faces the sun better.
+static double trackSun(SunTracker& t, const std::array<double, 3>& s, bool first)
+{
+    const double lo = t.info.has_limits ? t.info.min_value : -M_PI;
+    const double hi = t.info.has_limits ? t.info.max_value :  M_PI;
+    const bool   full = hi - lo >= 2 * M_PI - 0.01;
+    const double step = M_PI / 180.0;
+    auto search = [&](double from, int n, double& best, double& best_area) {
+        for (int i = 0; i <= n; ++i) {
+            double v = from + i * step;
+            if (full && v > hi) v -= 2 * M_PI;
+            if (full && v < lo) v += 2 * M_PI;
+            v = std::min(std::max(v, lo), hi);
+            const double area = sunFacingArea(t, s, v);
+            if (area > best_area + 1e-12) { best_area = area; best = v; }
+        }
+    };
+    double best = t.value, best_area = -1.0;
+    if (first) search(lo, static_cast<int>((hi - lo) / step), best, best_area);
+    else       search(t.value - 30 * step, 60, best, best_area);
+    if (!first && !full) {
+        double g = best, g_area = -1.0;
+        search(lo, static_cast<int>((hi - lo) / step), g, g_area);
+        if (g_area > 1.02 * best_area) best = g;
+    }
+    t.value = best;
+    return best;
+}
+
+static void section17_animation(SRPEngine& engine)
+{
+    section(17, "Animation: moving sun, solar arrays following it, deployment");
+
+    const int    kDeployFrames = 40;              // parts deploy, sun fixed
+    const int    kOrbitFrames  = 160;             // sun goes once round the satellite
+    const double kFrameTime    = 36.0;            // s per frame (orbit of 96 min)
+    const double kSunElevation = 20.0 * M_PI / 180.0;
+
+    SatelliteDataset& ds = engine.dataset();
+    ds.clearAllJoints();
+    ds.load(0);
+    engine.setMaxReflections(0);
+
+    // Role of every declared joint in the scenario.
+    std::vector<std::pair<std::string, std::array<double, 2>>> deploy;   // from, to
+    std::vector<std::pair<std::string, std::array<double, 2>>> swing;    // centre, amplitude
+    std::vector<SunTracker> trackers;
+    for (const auto& name : ds.movableComponents()) {
+        const JointInfo ji = ds.jointInfo(name);
+        const auto st = ji.deploy_states.find("stowed"), dp = ji.deploy_states.find("deployed");
+        const double span = ji.max_value - ji.min_value;
+        if (st != ji.deploy_states.end() && dp != ji.deploy_states.end()) {
+            deploy.push_back({ name, { insideLimits(ji, st->second), insideLimits(ji, dp->second) } });
+        } else if (ji.type == "prismatic") {
+            deploy.push_back({ name, { ji.has_limits ? ji.min_value : ji.file_value,
+                                       ji.has_limits ? ji.max_value : ji.file_value + 1.0 } });
+        } else if (!ji.has_limits || span >= 1.5 * M_PI) {
+            trackers.push_back(probeTracker(ds, name));
+        } else {
+            const double room = std::min(ji.max_value - ji.file_value, ji.file_value - ji.min_value);
+            swing.push_back({ name, room > 0.05 ? std::array<double, 2>{ ji.file_value, 0.6 * room }
+                                                : std::array<double, 2>{ 0.5 * (ji.min_value + ji.max_value),
+                                                                         0.3 * span } });
+        }
+    }
+    auto clean = [](double x) { return std::fabs(x) < 1e-9 ? 0.0 : x; };
+    std::cout << "  Scenario for " << fs::path(ds.currentFile()).filename().string() << ":\n"
+              << std::fixed << std::setprecision(3);
+    for (const auto& d : deploy)
+        std::cout << "    deploy  " << std::left << std::setw(40) << d.first
+                  << d.second[0] << " -> " << d.second[1] << "\n";
+    for (const auto& t : trackers)
+        std::cout << "    follow  " << std::left << std::setw(40) << t.name << "axis ("
+                  << clean(t.axis[0]) << ", " << clean(t.axis[1]) << ", " << clean(t.axis[2])
+                  << "), " << t.faces.size() << " triangles\n";
+    for (const auto& s : swing)
+        std::cout << "    swing   " << std::left << std::setw(40) << s.first
+                  << "amplitude " << s.second[1] << " rad\n";
+
+    // The sun circles the axis of the largest solar array (body z if none),
+    // kSunElevation above the plane the array turns in.
+    auto area = [](const SunTracker& t) {
+        double s = 0.0;
+        for (const auto& f : t.faces) s += f[3];
+        return s;
+    };
+    std::stable_sort(trackers.begin(), trackers.end(),
+                     [&](const SunTracker& x, const SunTracker& y) { return area(x) > area(y); });
+    const std::array<double, 3> a = trackers.empty() ? std::array<double, 3>{ 0, 0, 1 } : trackers[0].axis;
+    const std::array<double, 3> ref = (std::fabs(a[2]) < 0.9) ? std::array<double, 3>{ 0, 0, 1 }
+                                                               : std::array<double, 3>{ 1, 0, 0 };
+    std::array<double, 3> e1 = { a[1] * ref[2] - a[2] * ref[1], a[2] * ref[0] - a[0] * ref[2],
+                                 a[0] * ref[1] - a[1] * ref[0] };
+    const double l1 = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+    for (auto& x : e1) x /= l1;
+    const std::array<double, 3> e2 = { a[1] * e1[2] - a[2] * e1[1], a[2] * e1[0] - a[0] * e1[2],
+                                       a[0] * e1[1] - a[1] * e1[0] };
+
+    SRPMethod method = SRPMethod::CentroidCPU;
+    std::string method_name = "CentroidCPU";
+    if (is_rtx_device_available())       { method = SRPMethod::CentroidRTX; method_name = "CentroidRTX"; }
+    else if (is_cuda_device_available()) { method = SRPMethod::CentroidGPU; method_name = "CentroidGPU"; }
+
+    const std::string out_dir = "results_3d/anim_" + fs::path(ds.currentFile()).stem().string();
+    std::cout << "\n  Method " << method_name << ", " << kDeployFrames + kOrbitFrames
+              << " frames -> " << out_dir << "\n";
+    code("FrameRecorder rec(dir);  ... ds.setJointValue(...); engine.setSunDirection(...);");
+    code("SRPResult r = engine.computeViz(method);  rec.addFrame(engine, r, t, note);");
+
+    FrameRecorder rec(out_dir);
+    std::vector<double> ms;
+    const double theta0 = 30.0 * M_PI / 180.0;
+    const int frames = kDeployFrames + kOrbitFrames;
+    for (int f = 0; f < frames; ++f) {
+        const bool   deploying = f < kDeployFrames;
+        const double u = deploying ? double(f) / (kDeployFrames - 1) : 1.0;
+        const double w = u * u * (3.0 - 2.0 * u);                          // smooth start and stop
+        const double orbit = deploying ? 0.0 : double(f - kDeployFrames) / kOrbitFrames;
+        const double theta = theta0 + 2 * M_PI * orbit;
+
+        for (const auto& d : deploy)
+            ds.setJointValue(d.first, d.second[0] + (d.second[1] - d.second[0]) * w);
+        for (const auto& s : swing) {
+            if (deploying) break;
+            const JointInfo ji = ds.jointInfo(s.first);
+            const double v = ji.file_value + (s.second[0] - ji.file_value) * std::min(1.0, 8.0 * orbit)
+                           + s.second[1] * std::sin(2 * M_PI * orbit);   // eases in from the file value
+            ds.setJointValue(s.first, insideLimits(ji, v));
+        }
+        std::array<double, 3> sun;
+        for (int i = 0; i < 3; ++i)
+            sun[i] = std::cos(kSunElevation) * (std::cos(theta) * e1[i] + std::sin(theta) * e2[i])
+                   + std::sin(kSunElevation) * a[i];
+        for (auto& t : trackers)
+            ds.setJointValue(t.name, trackSun(t, sun, f == 0));
+        engine.setSunDirection(sun[0], sun[1], sun[2]);
+
+        const auto t0 = std::chrono::high_resolution_clock::now();
+        const SRPResult r = engine.computeViz(method);   // with labels (the fast path has none)
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+
+        std::ostringstream note;
+        note << std::fixed << std::setprecision(0);
+        if (deploying) note << "deployment " << 100.0 * w << "%";
+        else           note << "sun " << 360.0 * orbit << " deg round the satellite";
+        if (!trackers.empty()) note << ", array " << trackers[0].value * 180.0 / M_PI << " deg";
+        rec.addFrame(engine, r, f * kFrameTime, note.str());
+    }
+    rec.finish();
+    ds.clearAllJoints();
+    ds.reload();
+
+    std::vector<double> sorted = ms;
+    std::sort(sorted.begin(), sorted.end());
+    std::cout << std::fixed << std::setprecision(2)
+              << "  Computed " << frames << " frames: median " << sorted[sorted.size() / 2]
+              << " ms, longest " << sorted.back()
+              << " ms (computeViz; a part leaving or returning to its file pose rebuilds once)\n";
+
+    const std::string cmd = "python animate_srp.py \"" + out_dir + "\"";
+    std::cout << "  Player: " << cmd << "\n";
+    std::string skip;                                  // SOLART_NO_PLAYER=1: do not start it
+#ifdef _WIN32
+    char* buf = nullptr; size_t len = 0;
+    if (_dupenv_s(&buf, &len, "SOLART_NO_PLAYER") == 0 && buf) skip = buf;
+    free(buf);
+#else
+    if (const char* v = std::getenv("SOLART_NO_PLAYER")) skip = v;
+#endif
+    if (fs::exists("animate_srp.py") && (skip.empty() || skip == "0")) {
+        if (std::system(cmd.c_str()) != 0)
+            std::cout << "  (the player did not run: needs Python 3 with numpy)\n";
+    }
+}
+
+// =============================================================================
 // Main calculation - interactive; user selects method or auto-picks fastest
 // =============================================================================
 
@@ -1187,6 +1452,7 @@ static const SectionEntry kSections[] = {
     { 14, "Visualisation (RTX, no reflections)",     section14_visualize           },
     { 15, "SRP visualization sweep (0..3 refl.)",    section15_viz_sweep           },
     { 16, "Hardware info (GPU / CUDA / OptiX)",      section16_hardware_info       },
+    { 17, "Animation (moving sun and parts)",        section17_animation           },
 };
 static constexpr int kNumSections = static_cast<int>(sizeof(kSections) / sizeof(kSections[0]));
 

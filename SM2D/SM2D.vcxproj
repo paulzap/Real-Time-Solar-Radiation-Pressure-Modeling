@@ -208,6 +208,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="SM3D_hw_info.cpp" />
     <ClCompile Include="SatelliteDataset.cpp" />
+    <ClCompile Include="FrameRecorder.cpp" />
     <ClCompile Include="ShadowAlgorithms.cpp" />
     <ClCompile Include="ReflectionRayCasting.cpp" />
     <ClCompile Include="PixelGridRayCasting.cpp" />

@@ -28,6 +28,9 @@
     <ClCompile Include="SatelliteDataset.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="FrameRecorder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ShadowAlgorithms.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

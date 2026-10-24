@@ -658,6 +658,8 @@ if ($foundVcpkgRoot) {
 New-Item -ItemType Directory -Force (Join-Path $distDir "python") | Out-Null
 Copy-Item (Join-Path $ScriptDir "SM2D\visualize3d.py") (Join-Path $distDir "python") -Force
 Write-OK "dist\python\visualize3d.py"
+Copy-Item (Join-Path $ScriptDir "SM2D\animate_srp.py") (Join-Path $distDir "python") -Force
+Write-OK "dist\python\animate_srp.py"
 
 # ---- generate SRPLibraryConfig.cmake (with baked-in vcpkg hint) ----
 $vcpkgInstalled = ""

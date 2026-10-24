@@ -140,6 +140,7 @@ endif()
 set(CPU_SRC
     SM2D/SRPLibrary.cpp
     SM2D/SatelliteDataset.cpp
+    SM2D/FrameRecorder.cpp
     SM2D/ShadowAlgorithms.cpp
     SM2D/ReflectionRayCasting.cpp
     SM2D/PixelGridRayCasting.cpp
@@ -245,6 +246,12 @@ endif()
 if(SM3D_BUILD_DEMO)
     add_executable(srp_demo SM2D/main.cpp)
     target_link_libraries(srp_demo PRIVATE srp)
+    # Player of the animation section (run separately with Python).
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/SM2D/animate_srp.py"
+        "${CMAKE_BINARY_DIR}/animate_srp.py"
+        COPYONLY
+    )
     if(SM3D_HAS_OPTIX)
         add_dependencies(srp_demo srp_ptx)
     endif()

@@ -30,6 +30,9 @@ three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
   articulating a fixed component is an error.
 - **SatForm3D 2.3 models**: pose of the file (`joint_value`), coupled joints,
   deployment states (`setDeploymentState`), shared meshes.
+- **Animation**: `FrameRecorder` records computed frames (moving parts, sun,
+  lit and shadowed triangles), `animate_srp.py` plays them as an HTML page;
+  demo section 17 shows the sun going round a satellite whose arrays follow it.
 - Results and visualisation data are unchanged up to single grazing rays.
 
 ### What's new in 1.1.0
@@ -275,6 +278,7 @@ SM2D/
 ├── SRPLibrary.h           # single public header — distribute this only
 ├── SRPLibrary.cpp         # SRPEngine implementation
 ├── SatelliteDataset.cpp   # HDF5 loader + joint articulation
+├── FrameRecorder.cpp      # animation frames (player: animate_srp.py)
 ├── ShadowAlgorithms.cpp   # SRP physics + CSV / Python visualisation helpers
 ├── ReflectionRayCasting.cpp
 ├── PixelGridRayCasting.cpp
@@ -288,6 +292,7 @@ SM2D/
 ├── bench_methods.h                  # lean (no bounce-tracking) entry points
 ├── LocalPaths.props.template        # copy → LocalPaths.props and fill in
 ├── main.cpp                         # demo / smoke-test programme
+├── visualize3d.py, animate_srp.py   # result viewer, animation player
 └── SM2D.vcxproj                     # VS 2022 project
 setup.ps1                            # one-shot dependency setup script
 ```
