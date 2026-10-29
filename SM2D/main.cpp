@@ -966,6 +966,7 @@ struct SunTracker {
     JointInfo   info;
     double      value = 0.0;
     std::array<double, 3> axis{};
+    std::array<double, 3> normal{};               // of the array blanket at the file pose, across the axis
     std::vector<std::array<double, 4>> faces;
 };
 
@@ -1011,6 +1012,26 @@ static SunTracker probeTracker(SatelliteDataset& ds, const std::string& name)
         for (int i = m1[k].first_triangle; i < m1[k].first_triangle + m1[k].triangle_count; i += stride)
             t.faces.push_back({ tris[i].normal_x, tris[i].normal_y, tris[i].normal_z, tris[i].area });
     }
+
+    // Blanket normal: main direction of the area-weighted normals across the axis
+    // (the two sides of a thin panel point opposite ways, so not their mean).
+    const auto& a = t.axis;
+    std::array<double, 3> u = std::fabs(a[0]) < 0.9 ? std::array<double, 3>{ 1, 0, 0 }
+                                                     : std::array<double, 3>{ 0, 1, 0 };
+    const double ua = u[0] * a[0] + u[1] * a[1] + u[2] * a[2];
+    for (int i = 0; i < 3; ++i) u[i] -= ua * a[i];
+    const double ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    for (auto& x : u) x /= ul;
+    const std::array<double, 3> v = { a[1] * u[2] - a[2] * u[1], a[2] * u[0] - a[0] * u[2],
+                                      a[0] * u[1] - a[1] * u[0] };
+    double suu = 0, suv = 0, svv = 0;
+    for (const auto& f : t.faces) {
+        const double nu = f[0] * u[0] + f[1] * u[1] + f[2] * u[2];
+        const double nv = f[0] * v[0] + f[1] * v[1] + f[2] * v[2];
+        suu += f[3] * nu * nu; suv += f[3] * nu * nv; svv += f[3] * nv * nv;
+    }
+    const double psi = 0.5 * std::atan2(2 * suv, suu - svv);
+    for (int i = 0; i < 3; ++i) t.normal[i] = std::cos(psi) * u[i] + std::sin(psi) * v[i];
     return t;
 }
 
@@ -1026,33 +1047,46 @@ static double sunFacingArea(const SunTracker& t, const std::array<double, 3>& s,
     return area;
 }
 
-// Joint value turning the most area to the sun, on a 1-degree grid. After the
-// first frame only near the previous value, so the array turns smoothly and
-// does not jump to its other side. A full-turn range wraps; a shorter one
-// stops at its limit and swings back when the far side faces the sun better.
+// Joint value turning the array blanket square to the sun: exact angle from the
+// blanket normal, either side of the blanket (both carry cells). The first frame
+// takes the side with more area facing the sun, later frames the side nearer the
+// previous value, so the array turns smoothly. (Choosing the angle by the largest
+// facing area alone makes it jitter by degrees: that maximum is flat, and the
+// panel edges and frame rods decide where it lies.) A full-turn range wraps; a
+// shorter one stops at its limit and swings back when the far side faces the sun
+// better.
 static double trackSun(SunTracker& t, const std::array<double, 3>& s, bool first)
 {
     const double lo = t.info.has_limits ? t.info.min_value : -M_PI;
     const double hi = t.info.has_limits ? t.info.max_value :  M_PI;
     const bool   full = hi - lo >= 2 * M_PI - 0.01;
-    const double step = M_PI / 180.0;
-    auto search = [&](double from, int n, double& best, double& best_area) {
-        for (int i = 0; i <= n; ++i) {
-            double v = from + i * step;
-            if (full && v > hi) v -= 2 * M_PI;
-            if (full && v < lo) v += 2 * M_PI;
-            v = std::min(std::max(v, lo), hi);
-            const double area = sunFacingArea(t, s, v);
-            if (area > best_area + 1e-12) { best_area = area; best = v; }
+    const auto&  a = t.axis;
+    const auto&  n = t.normal;
+    const double sa = s[0] * a[0] + s[1] * a[1] + s[2] * a[2];
+    if (1.0 - std::fabs(sa) < 1e-9) return t.value;          // sun along the axis: any angle
+    const double cross = a[0] * (n[1] * s[2] - n[2] * s[1]) + a[1] * (n[2] * s[0] - n[0] * s[2])
+                       + a[2] * (n[0] * s[1] - n[1] * s[0]);
+    const double phi = std::atan2(cross, n[0] * s[0] + n[1] * s[1] + n[2] * s[2]);
+    auto place = [&](double v) {
+        if (full) {
+            while (v > hi) v -= 2 * M_PI;
+            while (v < lo) v += 2 * M_PI;
         }
+        return std::min(std::max(v, lo), hi);
     };
-    double best = t.value, best_area = -1.0;
-    if (first) search(lo, static_cast<int>((hi - lo) / step), best, best_area);
-    else       search(t.value - 30 * step, 60, best, best_area);
-    if (!first && !full) {
-        double g = best, g_area = -1.0;
-        search(lo, static_cast<int>((hi - lo) / step), g, g_area);
-        if (g_area > 1.02 * best_area) best = g;
+    auto dist = [&](double v) {
+        double d = std::fabs(v - t.value);
+        if (full) d = std::min(d, 2 * M_PI - d);
+        return d;
+    };
+    const double c1 = place(t.info.file_value + phi), c2 = place(t.info.file_value + phi + M_PI);
+    const double a1 = sunFacingArea(t, s, c1), a2 = sunFacingArea(t, s, c2);
+    double best;
+    if (first) best = a1 >= a2 ? c1 : c2;
+    else {
+        best = dist(c1) <= dist(c2) ? c1 : c2;
+        const double other = best == c1 ? c2 : c1;
+        if (!full && sunFacingArea(t, s, other) > 1.02 * sunFacingArea(t, s, best)) best = other;
     }
     t.value = best;
     return best;
