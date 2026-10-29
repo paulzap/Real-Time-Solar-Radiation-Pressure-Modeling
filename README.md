@@ -35,6 +35,8 @@ three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
   as an HTML page in a technical or a space look (stars, the sun far away);
   demo section 17 shows the sun going round a satellite whose arrays follow it.
 - Results and visualisation data are unchanged up to single grazing rays.
+  The 100 models of the article's dataset on Zenodo give the same numbers as
+  1.1.0 (CPU bit for bit, GPU/RTX within the run-to-run spread).
 
 ### What's new in 1.1.0
 
@@ -161,7 +163,9 @@ separately on Zenodo:
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20261561.svg)](https://doi.org/10.5281/zenodo.20261561)
 
 Download and extract `.h5` files into `SM2D/data3d_hdf5_0.5/`
-(or pass any folder path to `SRPEngine`).
+(or pass any folder path to `SRPEngine`). Every version reads this dataset and
+gives the same results on it; the code used for the article is tagged
+`v1.0.0`.
 
 ---
 

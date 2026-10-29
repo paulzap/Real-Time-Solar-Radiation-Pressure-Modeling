@@ -4,7 +4,7 @@ All notable changes to SolaRT (the solar radiation pressure library for GPU RT
 cores, formerly "Solar Radiation Pressure Library — GPU & RT-Cores").
 Versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.2.0] — unreleased
+## [1.2.0] — 2026-10-29
 
 ### Changed — articulation no longer rebuilds the geometry
 
@@ -84,7 +84,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Demo section 17: a fixed scenario instead of an orbit — the declared parts
   deploy, the sun goes once round the satellite, solar arrays (revolute joints
   with at least three quarters of a turn) follow it, other joints swing; 200 frames are
-  computed with `computeViz()` and recorded.
+  computed with `computeViz()` and recorded. An array is turned square to the
+  sun from the main normal of its faces (choosing the angle by the largest lit
+  area made the arrays jitter by degrees and the moment saw-tooth from frame to
+  frame).
 
 ### Fixed
 
@@ -105,6 +108,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
   flip whole strips of grid cells: up to about 50 cells (1e-3 of the force) for
   the pixel-grid methods, against an error of the method itself of 0.2–0.3 %.
   Body-frame centroids and normals are bit-identical to `triangles()`.
+- **The dataset of the article** (Zenodo 10.5281/zenodo.20261561, 100 models,
+  up to 5.4 million triangles): every file loads; in the pose of the file all
+  six methods give the 1.1.0 results — `CentroidCPU` bit for bit on all 100
+  models, the GPU/RTX methods within 5e-13 of the force and 4e-12 of the
+  moment, the same as two calls of 1.1.0 differ. Call times unchanged
+  (`satellite_62`, `CentroidRTX`: 2.2–2.3 ms in both versions).
+- SatForm3D 2.3 sets of 100 models with 0.5 m and 0.1 m meshes (up to 512 582
+  triangles): all methods run; the force differs from the generator's `/srp`
+  table by 0.2–0.7 % (median), by single rays of the one-point methods on
+  coarse facets — on the finer mesh the outliers disappear.
 
 ## [1.1.0] — 2026-10-23
 
