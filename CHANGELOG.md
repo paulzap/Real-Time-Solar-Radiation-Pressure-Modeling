@@ -4,7 +4,7 @@ All notable changes to SolaRT (the solar radiation pressure library for GPU RT
 cores, formerly "Solar Radiation Pressure Library — GPU & RT-Cores").
 Versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.2.1] — 2026-10-30
+## [1.2.1] — 2026-10-31
 
 This release corrects defects found by checking the library against exact answers.
 The results of the article are not put in question: its experiments used random Sun
