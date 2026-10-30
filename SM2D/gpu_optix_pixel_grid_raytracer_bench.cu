@@ -82,12 +82,7 @@ static RTXGridBenchState g_grid_bench_inst;   // files with movable components: 
 // ---------------------------------------------------------------------------
 static std::string load_ptx_grid_bench()
 {
-    const char* candidates[] = {
-        "optix_shaders_pixel_grid_bench.ptx",
-        "Debug/optix_shaders_pixel_grid_bench.ptx",
-        "Release/optix_shaders_pixel_grid_bench.ptx"
-    };
-    for (const char* path : candidates) {
+    for (const std::string& path : ptx_search_paths("optix_shaders_pixel_grid_bench.ptx")) {
         std::ifstream f(path, std::ios::binary);
         if (f.good()) {
             std::ostringstream ss;

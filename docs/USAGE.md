@@ -36,8 +36,8 @@ This guide covers building the library, integrating it into your project, and us
 |---|---|---|
 | HDF5 ≥ 1.12 | All builds | [hdfgroup.org](https://www.hdfgroup.org/downloads/hdf5/) or vcpkg |
 | HighFive ≥ 2.7 | All builds | vcpkg (`highfive`) |
-| CUDA Toolkit ≥ 11.8 | GPU methods | [developer.nvidia.com](https://developer.nvidia.com/cuda-downloads) |
-| OptiX SDK ≥ 8.0 | RTX methods | [developer.nvidia.com/optix](https://developer.nvidia.com/optix) |
+| CUDA Toolkit ≥ 12.4 (tested: 12.4) | GPU methods | [developer.nvidia.com](https://developer.nvidia.com/cuda-downloads) |
+| OptiX SDK 9.1.0 (tested) | RTX methods | [developer.nvidia.com/optix](https://developer.nvidia.com/optix) |
 | pybind11 ≥ 2.11 | Python visualization | vcpkg (`pybind11`) |
 | Python ≥ 3.10 | Python visualization | [python.org](https://www.python.org/) |
 
@@ -176,7 +176,7 @@ cmake --build build_full
 |---|---|
 | `srp.lib` / `libsrp.a` | Static library to link into your project |
 | `srp_demo` / `srp_demo.exe` | Demo executable |
-| `*.ptx` | OptiX shader files — must be **in the same directory as your exe** at runtime |
+| `*.ptx` | OptiX shader files — looked for in the working directory, its `Debug/` and `Release/`, then next to your exe |
 
 ---
 
@@ -462,7 +462,7 @@ enum class SRPMethod {
 | Multi-bounce reflections | Any method — pass `setMaxReflections(n)` |
 
 Calling an unavailable method throws `std::runtime_error` with a descriptive message.  
-Use `is_cuda_device_available()` / `is_rtx_device_available()` to check at runtime (declared in the demo's `main.cpp`).
+Use `is_cuda_device_available()` / `is_rtx_device_available()` to check at runtime (declared in `SRPLibrary.h`).
 
 ---
 
@@ -471,8 +471,8 @@ Use `is_cuda_device_available()` / `is_rtx_device_available()` to check at runti
 ```cpp
 struct SRPResult {
     std::vector<int>       labels;        // per-triangle: 1 = illuminated, 0 = shadowed
-    std::array<double, 3>  total_force;   // total SRP force  [Fx, Fy, Fz]  (N)
-    std::array<double, 3>  total_moment;  // total SRP moment [Mx, My, Mz]  (N·m)
+    std::array<double, 3>  total_force;   // total SRP force  [Fx, Fy, Fz]; N if g_srp_phi0 is set, else m²
+    std::array<double, 3>  total_moment;  // total SRP moment [Mx, My, Mz]; N·m if g_srp_phi0 is set, else m³
 };
 
 // Reading results
@@ -493,6 +493,11 @@ use these labels as a map of illumination.
 **Numerical floor.** GPU and RTX methods keep the geometry and optics in `float` on the
 device, so their results agree with the CPU methods to about 1e-7 at best, although
 the kernels accumulate in `double`.
+
+**Pixel grid along an axis.** With the Sun exactly along a model axis and a mesh aligned
+with that axis, rows of rays can fall exactly on the outline of a surface and be counted
+at full weight. This is an error of the grid, up to about 2 × step / size, not of the
+physics; a smaller step reduces it, and so does any Sun direction off the axis.
 
 ---
 
@@ -664,23 +669,12 @@ The demo executable (`srp_demo`) serves as the primary test harness. Run it and 
 srp_demo path/to/h5_files
 ```
 
-Key menu items for testing:
+The numbered sections of the menu demonstrate each part of the API; the letter items
+(C, P, G, W, A, Q) choose the method and settings. Things worth comparing:
 
-| Item | Tests |
-|---|---|
-| **Hardware info** | Confirms CUDA + OptiX runtime are found |
-| **CentroidCPU** | Baseline CPU result (reference) |
-| **CentroidGPU** | GPU result — compare labels/forces against CPU |
-| **CentroidRTX** | RTX result — compare labels/forces against GPU |
-| **PixelGridCPU** | Pixel-grid CPU baseline |
-| **PixelGridGPU** | Pixel-grid GPU — compare against CPU |
-| **PixelGridRTX** | Pixel-grid RTX — compare against GPU |
-| **Benchmark** | Times all available methods, prints ns/triangle |
-| **Visualize** | Opens interactive 3D plot in browser |
-
-**Validation rules of thumb:**
-
-- `CentroidCPU` vs `CentroidGPU` vs `CentroidRTX`: force/moment should agree to < 0.01%  
+- `CentroidCPU` vs `CentroidGPU` vs `CentroidRTX`: force/moment should agree to about 0.01 % or better
+- The grid of `PixelGridRTX` is turned relative to that of `PixelGridGPU`, so the two sample different rays;
+  compare them only within the sampling error of the grid step  
 - `PixelGrid*` vs `Centroid*`: expect differences on satellites with small/thin facets; differences decrease as `grid_step` decreases  
 - After `setMaxReflections(0)` (default): zero entries ≥ 1 in `getBounceLevels()`  
 - After `setMaxReflections(2)`: at least some entries = 1 or 2 for geometry with facing surfaces (solar panels)
@@ -725,6 +719,7 @@ numpy  pandas  plotly  matplotlib
 
 ```cpp
 // After any compute() call:
+// after compute() on the CPU, or after computeViz() on GPU/RTX (compute() there returns no labels)
 engine.visualizeLastResult();         // open in browser (plotly HTML)
 engine.visualizeLastResult(1, false); // all triangles, no normal arrows
 engine.visualizeLastResult(3, true);  // every 3rd triangle, show normals
@@ -743,13 +738,14 @@ engine.visualizeLastResult();
 
 ```bash
 # Windows — set before launching the app:
-set PYTHONHOME=C:\Users\you\AppData\Local\Programs\Python\Python312
+set SRP_PYTHONHOME=C:\Users\you\AppData\Local\Programs\Python\Python312
 
 # Linux / macOS:
-export PYTHONHOME=/usr/local
+export SRP_PYTHONHOME=/usr/local
 ```
 
-Or in VS: **Project → Properties → Debugging → Environment** → add `PYTHONHOME=C:\...\Python312`
+Or in VS: **Project → Properties → Debugging → Environment** → add `SRP_PYTHONHOME=C:\...\Python312`.
+On Windows the library overwrites `PYTHONHOME` with the Python it finds; `SRP_PYTHONHOME` chooses that Python.
 
 ### Animation
 
@@ -838,7 +834,7 @@ CentroidRTX requires OptiX. Use CentroidCPU/CentroidGPU or rebuild with OptiX su
 Check availability at runtime:
 
 ```cpp
-// Declared in main.cpp (or your own wrapper):
+// Declared in SRPLibrary.h:
 bool        is_cuda_device_available();
 bool        is_rtx_device_available();
 std::string rtx_unavailable_reason();

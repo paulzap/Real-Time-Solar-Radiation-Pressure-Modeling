@@ -109,7 +109,9 @@ __device__ static inline bool pg_ray_aabb_dev(
 {
     double tmin = 0.0, tmax = 1e30;
     for (int ax = 0; ax < 3; ++ax) {
-        double inv = 1.0 / d[ax];
+        // + 0.0 turns -0 into +0: with -0 a ray in the plane of a box face gives
+        // NaN on one side and -inf on the other, and the box is rejected
+        double inv = 1.0 / (d[ax] + 0.0);
         double lo = (b[ax] - o[ax]) * inv;      // b[0..2] = min
         double hi = (b[ax + 3] - o[ax]) * inv;  // b[3..5] = max
         if (lo > hi) { double tmp = lo; lo = hi; hi = tmp; }
@@ -138,12 +140,14 @@ __device__ static bool pg_ray_tri_dev(
     double f = 1.0 / a;
     double s[3] = { o[0] - v0[0], o[1] - v0[1], o[2] - v0[2] };
     double u = f * (s[0] * h[0] + s[1] * h[1] + s[2] * h[2]);
-    if (u < 0.0 || u > 1.0) return false;
+    // not exact: rounding must not let a ray through the edge between two triangles
+    const double BARY_EPS = 1e-9;
+    if (u < -BARY_EPS || u > 1.0 + BARY_EPS) return false;
     double q[3] = { s[1] * e1[2] - s[2] * e1[1],
                     s[2] * e1[0] - s[0] * e1[2],
                     s[0] * e1[1] - s[1] * e1[0] };
     double v = f * (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]);
-    if (v < 0.0 || u + v > 1.0) return false;
+    if (v < -BARY_EPS || u + v > 1.0 + BARY_EPS) return false;
     double t = f * (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]);
     if (t < EPS) return false;
     t_out = t;

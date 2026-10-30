@@ -43,12 +43,13 @@ The test geometry has its own DOI and should be cited separately — see [Datase
 
 ### What's new in 1.2.1
 
-- **Black surfaces are computed correctly.** A triangle with reflectance 0 and
-  specularity 0 used to be treated as half-reflecting by the centroid methods.
-  None of the published models has such triangles, so their results stand
-  (`CentroidGPU` moves only in the rounding of `float`, at most 8e-8 of the force).
-- A clean CMake build works without extra flags, and `find_package(SRPLibrary)`
-  works on Windows. See [CHANGELOG.md](CHANGELOG.md).
+- **Checked against exact answers, and corrected.** Black surfaces, pixel-grid rays with the
+  Sun along an axis, shadows and reflections on the CPU, and a stale geometry case on the GPU
+  gave wrong numbers. The article's results are not put in question: `CentroidRTX` and the
+  pixel-grid methods reproduce them, `CentroidGPU` moves at most in the fifth digit of the
+  force. **On the newer SatForm3D models, re-run what was computed with `CentroidCPU` or
+  `CentroidGPU`.** See [CHANGELOG.md](CHANGELOG.md).
+- A clean CMake build works without extra flags.
 
 ### What's new in 1.2.0
 
@@ -81,7 +82,8 @@ The test geometry has its own DOI and should be cited separately — see [Datase
 - Results for fixed (non-articulated) geometry and call times are unchanged.
 
 Full list: [CHANGELOG.md](CHANGELOG.md). Version 1.0.0 is the code that
-accompanies the article.
+accompanies the article; 1.2.1 corrects defects found afterwards, and the
+article's results are not affected by them (see the changelog).
 
 ---
 
@@ -91,7 +93,7 @@ Solar radiation pressure is a non-conservative perturbation that, on
 high-area-to-mass spacecraft, dominates secular orbit evolution beyond the drag
 regime. Computing it correctly on a real CAD mesh requires self-shadowing,
 multi-bounce specular reflections, and per-facet optical properties
-(absorptance α, specularity μ, emissivity ε). This library does that, fast,
+(reflectance α, specularity μ, emissivity ε). This library does that, fast,
 through a one-header C++ interface.
 
 The same triangulation can be evaluated by **six algorithms × two paths**:
@@ -121,13 +123,17 @@ Each method has two implementations:
 #include "SRPLibrary.h"
 
 int main() {
-    SRPEngine engine("data3d_hdf5_0.5");        // scans folder for .h5 files
+    SRPEngine engine("data3d_0.05");            // scans folder for .h5 files, loads the first
+    g_srp_phi0 = 4.56e-6;                       // N/m^2 at 1 AU; the default 1.0 gives m^2
 
     engine.setSunDirection(1.0, 0.0, 0.0);      // sun along +X (body frame)
     engine.setMaxReflections(2);                // 2 specular bounces
     engine.setGridStep(0.05);                   // 5 cm cell (PixelGrid* only)
 
-    engine.dataset().articulate("SolarPanel_L", JointConfig::rotY(M_PI / 4));
+    // Joints come from the file; list them with dataset().movableComponents()
+    auto& ds = engine.dataset();
+    if (!ds.movableComponents().empty())
+        ds.setJointValue(ds.movableComponents().front(), 0.5);   // rad, or m for a slider
 
     SRPResult r = engine.compute(SRPMethod::CentroidRTX);
 
@@ -154,8 +160,8 @@ int main() {
 
 | Method          | Backend         | Precision               | When to use                                                |
 | --------------- | --------------- | ----------------------- | ---------------------------------------------------------- |
-| `CentroidCPU`   | CPU             | double                  | No GPU available; reference for unit-tests.                |
-| `CentroidGPU`   | CUDA            | double                  | Any NVIDIA GPU; OptiX not installed.                       |
+| `CentroidCPU`   | CPU             | double                  | No GPU available; reference for the centroid family.       |
+| `CentroidGPU`   | CUDA            | float + double atomics  | Any NVIDIA GPU; OptiX not installed.                       |
 | `CentroidRTX`   | OptiX RT Cores  | float + double atomics  | **Default.** Fastest on Turing/Ampere/Ada.                 |
 | `PixelGridCPU`  | CPU             | double                  | High accuracy on small meshes; debugging.                  |
 | `PixelGridGPU`  | CUDA            | double                  | Large meshes without OptiX.                                |

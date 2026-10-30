@@ -77,12 +77,7 @@ static RTXCenterBenchState g_center_bench_inst;   // files with movable componen
 // ---------------------------------------------------------------------------
 static std::string load_ptx_center_bench()
 {
-    const char* candidates[] = {
-        "optix_shaders_center_bench.ptx",
-        "Debug/optix_shaders_center_bench.ptx",
-        "Release/optix_shaders_center_bench.ptx"
-    };
-    for (const char* path : candidates) {
+    for (const std::string& path : ptx_search_paths("optix_shaders_center_bench.ptx")) {
         std::ifstream f(path, std::ios::binary);
         if (f.good()) {
             std::ostringstream ss;

@@ -83,12 +83,7 @@ static RTXCenterState g_center_inst;   // files with movable components: IAS ove
 // ---------------------------------------------------------------------------
 static std::string load_ptx_center()
 {
-    const char* candidates[] = {
-        "optix_shaders_center.ptx",
-        "Debug/optix_shaders_center.ptx",
-        "Release/optix_shaders_center.ptx"
-    };
-    for (const char* path : candidates) {
+    for (const std::string& path : ptx_search_paths("optix_shaders_center.ptx")) {
         std::ifstream f(path, std::ios::binary);
         if (f.good()) {
             std::ostringstream ss;

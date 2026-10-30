@@ -512,6 +512,14 @@ if(NOT TARGET SRPLibrary::srp)
         set_property(TARGET SRPLibrary::srp APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES libaec::sz)
     endif()
+    # the CUDA libraries the static library needs
+    find_package(CUDAToolkit QUIET)
+    foreach(_srp_cuda CUDA::cudart CUDA::nvml CUDA::cuda_driver)
+        if(TARGET \${_srp_cuda})
+            set_property(TARGET SRPLibrary::srp APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES \${_srp_cuda})
+        endif()
+    endforeach()
     # Python
     if(Python3_FOUND AND EXISTS "\${_SRP_DIR}/python/visualize3d.py")
         set_property(TARGET SRPLibrary::srp APPEND PROPERTY

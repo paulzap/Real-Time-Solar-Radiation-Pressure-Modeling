@@ -23,6 +23,10 @@
 #include <string>
 #include "ShadowAlgorithms.h"
 
+// Where a compiled OptiX module is looked for: working directory, its Debug/ and
+// Release/, then the folder of the running executable.
+std::vector<std::string> ptx_search_paths(const char* file_name);
+
 // ---------------------------------------------------------------------------
 // Error-checking macros
 // ---------------------------------------------------------------------------

@@ -6,45 +6,87 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [1.2.1] — 2026-10-30
 
-### Fixed
+This release corrects defects found by checking the library against exact answers.
+The results of the article are not put in question: its experiments used random Sun
+directions, and the changes below move them at most in the fifth digit for `CentroidGPU`.
+Version 1.0.0 stays the code of the article.
 
-- **A black surface was computed as a half-reflecting one.** A triangle with
-  reflectance 0 and specularity 0 got 0.5 / 0.5 in the centroid methods, a
-  substitution left from the CSV input that no longer exists; the pixel-grid methods
-  used the true zeros, so the two families disagreed (a closed black cube: 1.42 against
-  the exact 1.00). The optics are now used as given in all six methods. None of the
-  published datasets has such triangles (all 100 models of the article's dataset, 52
-  million triangles, were checked), so their results stand: `CentroidCPU` is bitwise the
-  same, `CentroidRTX` and the pixel-grid methods agree within run-to-run noise, and
-  `CentroidGPU` moves only in the rounding of `float` (at most 8e-8 of the force) because
-  its kernels were recompiled; its difference from `CentroidCPU` is unchanged.
-- Pixel-grid methods refused reflections on a fully black model; they now accept it.
-- **A clean CMake build failed** with `atomicAdd` errors: the guard that chooses the CUDA
-  architectures could never fire, and the code was built for sm_52. The default is now
-  really 75, 86 and 89, and an architecture below 60 stops with a clear message.
-  `setup.ps1` passes the architecture it detects.
-- `find_package(SRPLibrary)` failed on Windows: `setup.ps1` wrote the vcpkg path with
-  backslashes into `SRPLibraryConfig.cmake`. The generated configs of both setup scripts
-  no longer call `cmake_minimum_required()`, which reset the policies of the user's project.
+**Numbers on the 100 models of the article's dataset** (5 Sun directions each, 0 and 3
+reflections, against 1.2.0): `CentroidRTX`, `PixelGridGPU` and `PixelGridRTX` agree within
+run-to-run noise. `CentroidGPU` moves by at most 6.6e-5 of the force and 4.6e-3 of the
+moment, `CentroidCPU` by at most 7.2e-4 and 4.2e-3 (shadow test and reflections below).
+On the newer SatForm3D models, where these effects are larger, half of the models move by
+more than 0.1 % and a few by up to 15 %: re-run results computed there with `CentroidCPU` or
+`CentroidGPU`.
+
+### Fixed — wrong numbers
+
+- **Pixel-grid methods lost rays with the Sun along a model axis.** A ray lying in the
+  plane of a bounding-box face was rejected (a zero direction component with a negative
+  sign gave NaN and -inf), so rays passed through the model along the seams of the BVH:
+  -2.1 % on `satellite_3` with the Sun along +Y, the default direction, -29 % on a smaller
+  model, -52 % on a cube with an exact answer. `PixelGridCPU` and `PixelGridGPU` affected;
+  `PixelGridRTX` was right. Rays through the edge shared by two triangles are no longer lost
+  to rounding either, here and in `CentroidCPU`.
+- **`compute()` on GPU/RTX kept the old geometry when the whole model hung on one joint**
+  (only the first rotation counted, up to +91 % and more, without a warning). Regression of
+  1.2.0, no published or SatForm3D model is built this way.
+- **A black surface was computed as a half-reflecting one.** A triangle with reflectance 0
+  and specularity 0 got 0.5 / 0.5 in the centroid methods, a substitution left from the CSV
+  input that no longer exists (a closed black cube: 1.42 against the exact 1.00). The optics
+  are now used as given in all six methods, and pixel-grid methods accept a fully black model
+  with reflections. No published dataset has such triangles.
+- **`CentroidCPU` and `CentroidGPU` missed shadows from a triangle whose centre lies behind
+  the point**, because of a filter on the centre that `CentroidRTX` does not have. The three
+  backends now agree: on the newer models from up to 10.6 % of the force down to 4e-4.
+- **`CentroidCPU` reflections now match `CentroidGPU` and `CentroidRTX`:** moment arm and next
+  ray start at the actual hit point rather than the centre of the triangle (up to 2.7 % of
+  the force on models with large triangles), the same surface offset, and a ray on a shared
+  edge no longer gives its force to both triangles.
+- **`g_srp_phi0` is now a pure factor.** On the CPU the chain of reflections was cut at an
+  absolute power, so setting it to 4.56e-6 lost later reflections (+36 % on a small mirror
+  chain). `PixelGridCPU` is affected the same way; both are fixed.
+- **Small triangles were transparent** to `CentroidCPU` (2 × area below 1e-6 m²) and
+  `CentroidGPU` (below 1e-8 m²).
+- **`compute()` and `computeViz()` of `CentroidGPU` gave different numbers** (up to 0.97 %):
+  the shadow and reflected rays of `computeViz()` had no offset from the surface.
+
+### Fixed — crashes and building
+
+- A clean CMake build failed with `atomicAdd` errors: the guard that chooses the CUDA
+  architectures could never fire, and the code was built for sm_52. The default is now really
+  75, 86 and 89, and an architecture below 60 stops with a clear message. `setup.ps1` passes
+  the architecture it detects.
+- `find_package(SRPLibrary)` failed on Windows because of backslashes in the generated
+  `SRPLibraryConfig.cmake`, and could not link the CUDA libraries. The generated configs no
+  longer call `cmake_minimum_required()`, which reset the policies of the user's project.
+- `load()` that refused a joint left the dataset inconsistent, and the next `reload()` crashed.
+  The new file now stays loaded, in the pose of the file.
+- `CentroidGPU` ended the process on a CUDA error; it now throws `std::runtime_error` like the
+  other methods.
+- A short `normals` array or a wrong vertex index in a file crashed; such a file, or one with a
+  short `reflectance` or `specularity` array, is now refused at load time.
+- `.ptx` files are also looked for next to the executable, as the documentation said.
 
 ### Changed
 
-- A file whose `reflectance` or `specularity` array is shorter than its triangle list is
-  refused at load time; such triangles used to read as zero without notice.
-- The citation section of the README moved up, right under the introduction.
+- The citation section of the README moved up, right under the introduction, and the quickstart
+  uses names that exist in the dataset.
+- The default `SURFACE_OFFSET` of `CentroidCPU` is 1e-4 m, as on GPU and RTX (was 2 mm).
 
 ### Added
 
-- Every source file starts with the authorship line, the SPDX licence identifier and the
-  paper to cite.
-- `SOLART_CITATION` in `SRPLibrary.h`: the reference to cite, as a string.
-- The demo programs print that reference when they start. The library itself prints
-  nothing.
+- Every source file starts with the authorship line, the SPDX licence identifier and the paper
+  to cite. `SOLART_CITATION` in `SRPLibrary.h` gives the reference as a string, and the demo
+  programs print it when they start; the library itself prints nothing.
 
 ### Documentation
 
-- `emissivity` is stored but takes no part in the force; GPU and RTX results have a
-  numerical floor of about 1e-7; pixel-grid labels are not a map of illumination.
+- α is the reflectance, not the absorptance; forces are in m² unless `g_srp_phi0` is set;
+  `SRP_PYTHONHOME` is the variable that chooses Python; versions, the demo menu and the
+  declarations of helper functions match the code; `emissivity` takes no part in the force;
+  GPU and RTX results have a numerical floor of about 1e-7; pixel-grid labels are not a map of
+  illumination; the grid error with the Sun exactly along an axis is described.
 
 ## [1.2.0] — 2026-10-29
 
@@ -208,5 +250,7 @@ Code accompanying the article: P.R. Zapevalin, *Real-Time Solar Radiation
 Pressure Modeling on GPU RT-Cores*, Aerospace Science and Technology, 2026,
 113714, DOI 10.1016/j.ast.2026.113714.
 
+[1.2.1]: https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling/releases/tag/v1.2.1
+[1.2.0]: https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling/releases/tag/v1.2.0
 [1.1.0]: https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling/releases/tag/v1.1.0
 [1.0.0]: https://github.com/paulzap/Real-Time-Solar-Radiation-Pressure-Modeling/releases/tag/v1.0.0

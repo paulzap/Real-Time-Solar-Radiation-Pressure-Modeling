@@ -22,6 +22,15 @@
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 // ---------------------------------------------------------------------------
 // Global shared state definition
@@ -31,6 +40,20 @@ RTXSharedState g_rtx_shared;
 // ---------------------------------------------------------------------------
 // OptiX log callback (warnings/errors to stderr)
 // ---------------------------------------------------------------------------
+std::vector<std::string> ptx_search_paths(const char* file_name)
+{
+    std::vector<std::string> paths = { file_name, std::string("Debug/") + file_name,
+                                       std::string("Release/") + file_name };
+    char exe[4096] = {};
+#ifdef _WIN32
+    const bool ok = GetModuleFileNameA(nullptr, exe, sizeof(exe) - 1) > 0;
+#else
+    const bool ok = readlink("/proc/self/exe", exe, sizeof(exe) - 1) > 0;
+#endif
+    if (ok) paths.push_back((std::filesystem::path(exe).parent_path() / file_name).string());
+    return paths;
+}
+
 static void optix_log_cb(unsigned int level, const char* tag,
                          const char* message, void* /*cbdata*/)
 {

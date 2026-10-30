@@ -83,12 +83,7 @@ static RTXGridState g_grid_inst;   // files with movable components: IAS over pe
 // ---------------------------------------------------------------------------
 static std::string load_ptx_grid()
 {
-    const char* candidates[] = {
-        "optix_shaders_pixel_grid.ptx",
-        "Debug/optix_shaders_pixel_grid.ptx",
-        "Release/optix_shaders_pixel_grid.ptx"
-    };
-    for (const char* path : candidates) {
+    for (const std::string& path : ptx_search_paths("optix_shaders_pixel_grid.ptx")) {
         std::ifstream f(path, std::ios::binary);
         if (f.good()) {
             std::ostringstream ss;

@@ -123,8 +123,16 @@ std::string SatelliteDataset::currentFile() const {
 void SatelliteDataset::load(const std::string& file_path) {
     current_file_ = file_path;
     load_h5_into_cache(file_path);   // slow: file read + HDF5 parse, once
-    for (const auto& [name, jc] : joints_) validateJoint(name, jc, false);
-    resetRigidParts();
+    resetRigidParts();               // before anything can throw: keeps the split sized to the nodes
+    try {
+        for (const auto& [name, jc] : joints_) validateJoint(name, jc, false);
+    } catch (...) {
+        // the new file stays loaded, in its file pose; joints_ still holds what was refused
+        commitJoints({});
+        rebuildTriangles(committed_joints_);
+        triangles_stale_ = false;
+        throw;
+    }
     commitJoints(joints_);
     rebuildTriangles(committed_joints_);
     triangles_stale_ = false;
@@ -836,6 +844,24 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
             node.vertex_mean = {cx, cy, cz};
         }
 
+        if (node.has_mesh) {
+            // reflectance = specularity = 0 is a legal black surface, so a short array
+            // must not read as zero; the others would run off the end of the array
+            const size_t M = node.tri_indices.size();
+            const auto bad = [&](const std::string& what) {
+                cached_nodes_.clear();
+                return std::runtime_error("Component '" + node.name + "' in " + file_path + ": " + what);
+            };
+            if (node.reflectance.size() < M || node.specularity.size() < M)
+                throw bad("reflectance and specularity must have one value per triangle");
+            if (node.normals_local.size() < M)
+                throw bad("normals must have one row per triangle");
+            const int V = static_cast<int>(node.vertices_local.size());
+            for (const auto& tri : node.tri_indices)
+                for (int k = 0; k < 3; ++k)
+                    if (tri[k] < 0 || tri[k] >= V)
+                        throw bad("triangle vertex index out of range");
+        }
         cached_nodes_.push_back(std::move(node));
         paths.push_back(path);
         driver_paths.push_back(driver_path);
@@ -981,13 +1007,6 @@ void SatelliteDataset::rebuildTriangles(
 
         if (!node.has_mesh) continue;
         const int M = static_cast<int>(node.tri_indices.size());
-
-        // reflectance = specularity = 0 is a legal black surface, so a short
-        // array must not read as zero
-        if (first_build && (static_cast<int>(node.reflectance.size()) < M ||
-                            static_cast<int>(node.specularity.size()) < M))
-            throw std::runtime_error("Component '" + node.name + "': reflectance and "
-                                     "specularity must have one value per triangle");
 
         for (int t = 0; t < M; ++t) {
             Triangle& tri = triangles_[write_idx];

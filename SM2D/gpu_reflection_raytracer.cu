@@ -38,10 +38,9 @@
 
 #define REFL_CUDA_CHECK(ans) { reflGpuAssert((ans), __FILE__, __LINE__); }
 inline void reflGpuAssert(cudaError_t code, const char* file, int line, bool abort = true) {
-    if (code != cudaSuccess) {
-        fprintf(stderr, "CUDA error: %s %s %d\n", cudaGetErrorString(code), file, line);
-        if (abort) exit(code);
-    }
+    if (code != cudaSuccess && abort)
+        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(code) + " at " +
+                                 file + ":" + std::to_string(line));
 }
 
 // ---------------------- GPU structures (float) ----------------------
@@ -106,7 +105,7 @@ __device__ bool reflRayTriangleIntersect(const float orig[3], const float dir[3]
         dir[0] * edge2[1] - dir[1] * edge2[0]
     };
     float det = edge1[0] * pvec[0] + edge1[1] * pvec[1] + edge1[2] * pvec[2];
-    if (fabsf(det) < 1e-7f) return false;
+    if (fabsf(det) < 1e-13f) return false;
 
     float invDet = 1.0f / det;
     float tvec[3] = { orig[0] - v0[0], orig[1] - v0[1], orig[2] - v0[2] };
@@ -122,7 +121,7 @@ __device__ bool reflRayTriangleIntersect(const float orig[3], const float dir[3]
     if (v < 0.0f || u + v > 1.0f) return false;
 
     t = (edge2[0] * qvec[0] + edge2[1] * qvec[1] + edge2[2] * qvec[2]) * invDet;
-    return (t > 1e-5f);
+    return (t > 1e-8f);
 }
 
 // ======================== Phase 1 kernels (direct illumination) ========================
@@ -151,7 +150,11 @@ __global__ void reflShadowKernel_global(const TriangleDevRefl* __restrict__ tria
     if (i >= N) return;
     if (labels[i] == 0) return;
 
-    float origin[3] = { centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2] };
+    // Offset origin along face normal, as in compute()  //PHY
+    float snx = triangles[i].normal[0], sny = triangles[i].normal[1], snz = triangles[i].normal[2];
+    float origin[3] = { centers[i * 3]     + 1e-4f * snx,
+                        centers[i * 3 + 1] + 1e-4f * sny,
+                        centers[i * 3 + 2] + 1e-4f * snz };
     float dir[3] = { sunX, sunY, sunZ };
 
     unsigned int stack[128];
@@ -170,12 +173,6 @@ __global__ void reflShadowKernel_global(const TriangleDevRefl* __restrict__ tria
         if (node.is_leaf) {
             unsigned int j = node.triangle_idx;
             if (i == j) continue;
-
-            float diff_x = centers[j * 3]     - origin[0];
-            float diff_y = centers[j * 3 + 1] - origin[1];
-            float diff_z = centers[j * 3 + 2] - origin[2];
-            float proj = diff_x * dir[0] + diff_y * dir[1] + diff_z * dir[2];
-            if (proj <= 1e-5f) continue;
 
             float v0[3] = { triangles[j].v[0][0], triangles[j].v[0][1], triangles[j].v[0][2] };
             float v1[3] = { triangles[j].v[1][0], triangles[j].v[1][1], triangles[j].v[1][2] };
@@ -207,7 +204,11 @@ __global__ void reflShadowKernel_constant(const TriangleDevRefl* __restrict__ tr
     if (i >= N) return;
     if (labels[i] == 0) return;
 
-    float origin[3] = { centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2] };
+    // Offset origin along face normal, as in compute()  //PHY
+    float snx = triangles[i].normal[0], sny = triangles[i].normal[1], snz = triangles[i].normal[2];
+    float origin[3] = { centers[i * 3]     + 1e-4f * snx,
+                        centers[i * 3 + 1] + 1e-4f * sny,
+                        centers[i * 3 + 2] + 1e-4f * snz };
     float dir[3] = { sunX, sunY, sunZ };
 
     unsigned int stack[128];
@@ -226,12 +227,6 @@ __global__ void reflShadowKernel_constant(const TriangleDevRefl* __restrict__ tr
         if (node.is_leaf) {
             unsigned int j = node.triangle_idx;
             if (i == j) continue;
-
-            float diff_x = centers[j * 3]     - origin[0];
-            float diff_y = centers[j * 3 + 1] - origin[1];
-            float diff_z = centers[j * 3 + 2] - origin[2];
-            float proj = diff_x * dir[0] + diff_y * dir[1] + diff_z * dir[2];
-            if (proj <= 1e-5f) continue;
 
             float v0[3] = { triangles[j].v[0][0], triangles[j].v[0][1], triangles[j].v[0][2] };
             float v1[3] = { triangles[j].v[1][0], triangles[j].v[1][1], triangles[j].v[1][2] };
@@ -303,9 +298,9 @@ __global__ void reflGenerateFirstBounceKernel(
 
     unsigned int write_idx = atomicAdd(ray_count, 1u);
 
-    ray_origins[write_idx * 3]     = centers[i * 3];
-    ray_origins[write_idx * 3 + 1] = centers[i * 3 + 1];
-    ray_origins[write_idx * 3 + 2] = centers[i * 3 + 2];
+    ray_origins[write_idx * 3]     = centers[i * 3]     + 1e-4f * nx;
+    ray_origins[write_idx * 3 + 1] = centers[i * 3 + 1] + 1e-4f * ny;
+    ray_origins[write_idx * 3 + 2] = centers[i * 3 + 2] + 1e-4f * nz;
 
     ray_dirs[write_idx * 3]     = rx;
     ray_dirs[write_idx * 3 + 1] = ry;
@@ -476,7 +471,7 @@ __global__ void reflTraceAndBounceKernel(
 
     // ---- Spawn next-bounce ray ----
     float new_intensity = intensity * alpha_j * mu_j;
-    if (new_intensity < 1e-10f) return;
+    if (new_intensity < 1e-30f) return;
 
     // r_next = 2(nj . s_eq) nj - s_eq
     float rnx = 2.0f * cos_theta_j * nj[0] - s_eq[0];
@@ -487,9 +482,9 @@ __global__ void reflTraceAndBounceKernel(
     rnx /= rnlen;  rny /= rnlen;  rnz /= rnlen;
 
     unsigned int write_idx = atomicAdd(next_ray_count, 1u);
-    next_ray_origins[write_idx * 3]     = hit_j[0];
-    next_ray_origins[write_idx * 3 + 1] = hit_j[1];
-    next_ray_origins[write_idx * 3 + 2] = hit_j[2];
+    next_ray_origins[write_idx * 3]     = hit_j[0] + 1e-4f * nj[0];
+    next_ray_origins[write_idx * 3 + 1] = hit_j[1] + 1e-4f * nj[1];
+    next_ray_origins[write_idx * 3 + 2] = hit_j[2] + 1e-4f * nj[2];
     next_ray_dirs[write_idx * 3]     = rnx;
     next_ray_dirs[write_idx * 3 + 1] = rny;
     next_ray_dirs[write_idx * 3 + 2] = rnz;
@@ -1005,11 +1000,6 @@ __device__ static bool rvPartsShadowed(
             if (node.is_leaf) {
                 unsigned int j = node.triangle_idx;
                 if (i == j) continue;
-                float diff_x = centers[j * 3]     - origin[0];
-                float diff_y = centers[j * 3 + 1] - origin[1];
-                float diff_z = centers[j * 3 + 2] - origin[2];
-                float proj = diff_x * dir[0] + diff_y * dir[1] + diff_z * dir[2];
-                if (proj <= 1e-5f) continue;
                 float t;
                 if (reflRayTriangleIntersect(ol, dl, triangles[j].v[0], triangles[j].v[1], triangles[j].v[2], t))
                     return true;
@@ -1078,7 +1068,11 @@ __global__ void reflShadowKernel_parts(const TriangleDevRefl* __restrict__ trian
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
     if (labels[i] == 0) return;
-    float origin[3] = { centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2] };
+    // Offset origin along face normal, as in compute()  //PHY
+    float snx = triangles[i].normal[0], sny = triangles[i].normal[1], snz = triangles[i].normal[2];
+    float origin[3] = { centers[i * 3]     + 1e-4f * snx,
+                        centers[i * 3 + 1] + 1e-4f * sny,
+                        centers[i * 3 + 2] + 1e-4f * snz };
     float dir[3] = { sunX, sunY, sunZ };
     if (rvPartsShadowed(triangles, nodes, centers, (unsigned int)i, origin, dir, nparts)) labels[i] = 0;
 }
@@ -1156,7 +1150,7 @@ __global__ void reflTraceAndBounceKernel_parts(
     atomicAdd(&moment_accum[2], hit_j[0] * fy - hit_j[1] * fx);   //PHY
 
     float new_intensity = intensity * alpha_j * mu_j;
-    if (new_intensity < 1e-10f) return;
+    if (new_intensity < 1e-30f) return;
     float rnx = 2.0f * cos_theta_j * nj[0] - s_eq[0];
     float rny = 2.0f * cos_theta_j * nj[1] - s_eq[1];
     float rnz = 2.0f * cos_theta_j * nj[2] - s_eq[2];
@@ -1165,9 +1159,9 @@ __global__ void reflTraceAndBounceKernel_parts(
     rnx /= rnlen;  rny /= rnlen;  rnz /= rnlen;
 
     unsigned int write_idx = atomicAdd(next_ray_count, 1u);
-    next_ray_origins[write_idx * 3]     = hit_j[0];
-    next_ray_origins[write_idx * 3 + 1] = hit_j[1];
-    next_ray_origins[write_idx * 3 + 2] = hit_j[2];
+    next_ray_origins[write_idx * 3]     = hit_j[0] + 1e-4f * nj[0];
+    next_ray_origins[write_idx * 3 + 1] = hit_j[1] + 1e-4f * nj[1];
+    next_ray_origins[write_idx * 3 + 2] = hit_j[2] + 1e-4f * nj[2];
     next_ray_dirs[write_idx * 3]     = rnx;
     next_ray_dirs[write_idx * 3 + 1] = rny;
     next_ray_dirs[write_idx * 3 + 2] = rnz;

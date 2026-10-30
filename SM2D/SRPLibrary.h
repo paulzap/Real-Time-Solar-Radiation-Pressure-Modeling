@@ -87,8 +87,8 @@ struct Triangle {
 // =============================================================================
 struct SRPResult {
     std::vector<int>       labels;        // per-triangle: 1 = illuminated, 0 = shadowed
-    std::array<double, 3>  total_force;   // total SRP force  [Fx, Fy, Fz]  (N)
-    std::array<double, 3>  total_moment;  // total SRP moment [Mx, My, Mz]  (N*m)
+    std::array<double, 3>  total_force;   // [Fx, Fy, Fz]: N if g_srp_phi0 is set, m^2 at the default 1.0
+    std::array<double, 3>  total_moment;  // [Mx, My, Mz]: N*m if g_srp_phi0 is set, m^3 at the default 1.0
 };
 
 // =============================================================================

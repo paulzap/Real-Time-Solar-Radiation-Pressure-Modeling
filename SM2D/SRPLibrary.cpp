@@ -35,6 +35,7 @@
 // The version is process-wide because the device copies are.
 // -----------------------------------------------------------------------------
 static std::uint64_t g_gpu_structure_version = 0;   // 0 = nothing uploaded yet
+static std::uint64_t g_gpu_geometry_version  = 0;
 
 static bool method_uses_gpu(SRPMethod m) {
     return m != SRPMethod::CentroidCPU && m != SRPMethod::PixelGridCPU;
@@ -87,11 +88,16 @@ struct SRPEngine::Impl {
     // Make the GPU copies of the geometry match the dataset (see above).
     void sync_gpu_geometry(SRPMethod method) {
         if (!method_uses_gpu(method)) return;
+        // Without a split into parts (the whole model hangs on one joint) the GPU
+        // copy is the triangle list itself, so every pose change must refresh it.
         const std::uint64_t v = ds.structureVersion();
-        if (v != g_gpu_structure_version) {
+        const std::uint64_t g = ds.geometryVersion();
+        if (v != g_gpu_structure_version ||
+            (ds.instanceScene().single() && g != g_gpu_geometry_version)) {
             invalidate_all_gpu_geometry();
             g_gpu_structure_version = v;
         }
+        g_gpu_geometry_version = g;
     }
 
     // Moment about the chosen reference point: M_ref = M_origin - r_ref x F.
@@ -302,8 +308,6 @@ struct SRPEngine::Impl {
                     }
                 }
             }
-            if (python_root.empty())
-                python_root = "C:\\Users\\zapevalin\\AppData\\Local\\Programs\\Python\\Python312";
 
             // Always override PYTHONHOME — pybind11 needs it to match the compiled-in version
             _putenv_s("PYTHONHOME", python_root.c_str());

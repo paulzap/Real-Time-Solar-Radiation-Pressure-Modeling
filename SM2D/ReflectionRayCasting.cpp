@@ -89,7 +89,9 @@ static bool ray_tri_intersect_refl(
     const double* v0, const double* v1, const double* v2,
     double& t)
 {
-    const double EPSILON = 1e-6;
+    const double EPSILON  = 1e-6;   // along the ray, metres
+    const double DET_EPS  = 1e-15;  // 2 * area * cos, m^2
+    const double BARY_EPS = 1e-9;   // rounding must not open the edge between triangles
     double edge1[3], edge2[3], h[3], s[3], q[3];
     double a, f, u, v;
 
@@ -103,20 +105,20 @@ static bool ray_tri_intersect_refl(
     h[2] = dir[0] * edge2[1] - dir[1] * edge2[0];
 
     a = edge1[0] * h[0] + edge1[1] * h[1] + edge1[2] * h[2];
-    if (std::abs(a) < EPSILON) return false;
+    if (std::abs(a) < DET_EPS) return false;
 
     f = 1.0 / a;
     for (int i = 0; i < 3; ++i) s[i] = origin[i] - v0[i];
 
     u = f * (s[0] * h[0] + s[1] * h[1] + s[2] * h[2]);
-    if (u < 0.0 || u > 1.0) return false;
+    if (u < -BARY_EPS || u > 1.0 + BARY_EPS) return false;
 
     q[0] = s[1] * edge1[2] - s[2] * edge1[1];
     q[1] = s[2] * edge1[0] - s[0] * edge1[2];
     q[2] = s[0] * edge1[1] - s[1] * edge1[0];
 
     v = f * (dir[0] * q[0] + dir[1] * q[1] + dir[2] * q[2]);
-    if (v < 0.0 || u + v > 1.0) return false;
+    if (v < -BARY_EPS || u + v > 1.0 + BARY_EPS) return false;
 
     t = f * (edge2[0] * q[0] + edge2[1] * q[1] + edge2[2] * q[2]);
     return (t > EPSILON);
@@ -134,7 +136,8 @@ SRPResult calculate_labels_ray_casting_reflections(
         return {};
 
     const double phi0  = g_srp_phi0;
-    const double MIN_INTENSITY = 1e-10;
+    const double MIN_INTENSITY = 1e-30;   // only to stop at zero: the chain is bounded by
+                                          // max_reflections, and phi0 must stay a pure factor
 
     // --- Normalize sun direction ---
     double len = std::sqrt(sun_vector[0] * sun_vector[0] +
@@ -279,12 +282,6 @@ SRPResult calculate_labels_ray_casting_reflections(
                 size_t j = node.triangle_idx;
                 if (i == j) continue;
 
-                double diff_x = centers[j][0] - origin[0];
-                double diff_y = centers[j][1] - origin[1];
-                double diff_z = centers[j][2] - origin[2];
-                double proj = diff_x * dir_x + diff_y * dir_y + diff_z * dir_z;
-                if (proj <= epsilon) continue;
-
                 double v0[3] = { triangles[j].v1_x, triangles[j].v1_y, triangles[j].v1_z };
                 double v1[3] = { triangles[j].v2_x, triangles[j].v2_y, triangles[j].v2_z };
                 double v2[3] = { triangles[j].v3_x, triangles[j].v3_y, triangles[j].v3_z };
@@ -339,10 +336,9 @@ SRPResult calculate_labels_ray_casting_reflections(
         return result;
     }
 
-    // Offset applied to every reflected ray origin along the triangle's surface normal.
-    // Prevents rays from hitting the thin edge-strip triangles of the same physical plate
-    // (plate thickness is ~1-2 mm; this offset lifts the ray origin clear of those strips).
-    static constexpr double SURFACE_OFFSET = 2e-3;  // 2 mm
+    // Offset applied to every reflected ray origin along the triangle's surface normal,
+    // the same as in the GPU and RTX methods.
+    static constexpr double SURFACE_OFFSET = 1e-4;
 
     struct ReflectionRay {
         size_t source_idx;   // polygon the ray originates from (self-intersection guard)
@@ -479,15 +475,17 @@ SRPResult calculate_labels_ray_casting_reflections(
             result.total_force[1] += fy;   //PHY
             result.total_force[2] += fz;   //PHY
 
-            double cx = centers[closest_idx][0];
-            double cy = centers[closest_idx][1];
-            double cz = centers[closest_idx][2];
+            // Actual hit point: moment arm and origin of the next ray
+            double cx = ray.origin[0] + closest_t * ray.direction[0];
+            double cy = ray.origin[1] + closest_t * ray.direction[1];
+            double cz = ray.origin[2] + closest_t * ray.direction[2];
             result.total_moment[0] += cy * fz - cz * fy;   //PHY
             result.total_moment[1] += cz * fx - cx * fz;   //PHY
             result.total_moment[2] += cx * fy - cy * fx;   //PHY
 
             // ---- Boundary co-hits: triangles within BOUNDARY_EPS of closest_t ----
-            // Both triangles sharing the hit edge are illuminated and emit reflected rays.
+            // Triangles sharing the hit edge are marked for display; the closest hit alone
+            // receives the force and emits the next ray, as in the other methods.
             {
                 const double BOUNDARY_EPS = 1e-5;
                 std::vector<size_t> b_stk = { root };
@@ -524,39 +522,6 @@ SRPResult calculate_labels_ray_casting_reflections(
                     }
                     result.labels[jco] = 1;
 
-                    double alpha_co = tjco.reflectance;
-                    double mu_co = tjco.specularity;
-                    double base_co = ray.intensity;                                                                          //PHY
-                    double sc_co   = -base_co * ((1.0 - alpha_co) + alpha_co*(1.0 - mu_co));                               //PHY
-                    double nc_co   = -base_co * (2.0*alpha_co*mu_co*cos_co + (2.0/3.0)*alpha_co*(1.0 - mu_co));            //PHY
-                    double fx_co = sc_co*s_eq_co[0] + nc_co*tjco.normal_x;   //PHY
-                    double fy_co = sc_co*s_eq_co[1] + nc_co*tjco.normal_y;   //PHY
-                    double fz_co = sc_co*s_eq_co[2] + nc_co*tjco.normal_z;   //PHY
-                    result.total_force[0] += fx_co;   //PHY
-                    result.total_force[1] += fy_co;   //PHY
-                    result.total_force[2] += fz_co;   //PHY
-                    result.total_moment[0] += centers[jco][1]*fz_co - centers[jco][2]*fy_co;   //PHY
-                    result.total_moment[1] += centers[jco][2]*fx_co - centers[jco][0]*fz_co;   //PHY
-                    result.total_moment[2] += centers[jco][0]*fy_co - centers[jco][1]*fx_co;   //PHY
-
-                    double new_int_co = ray.intensity * alpha_co * mu_co;
-                    if (new_int_co < MIN_INTENSITY) continue;
-                    double rnx_co = 2.0*cos_co*tjco.normal_x - s_eq_co[0];
-                    double rny_co = 2.0*cos_co*tjco.normal_y - s_eq_co[1];
-                    double rnz_co = 2.0*cos_co*tjco.normal_z - s_eq_co[2];
-                    double rlen_co = std::sqrt(rnx_co*rnx_co + rny_co*rny_co + rnz_co*rnz_co);
-                    if (rlen_co < 1e-12) continue;
-                    rnx_co /= rlen_co; rny_co /= rlen_co; rnz_co /= rlen_co;
-                    ReflectionRay next_co;
-                    next_co.source_idx  = jco;
-                    next_co.origin[0]   = centers[jco][0] + SURFACE_OFFSET * tjco.normal_x;
-                    next_co.origin[1]   = centers[jco][1] + SURFACE_OFFSET * tjco.normal_y;
-                    next_co.origin[2]   = centers[jco][2] + SURFACE_OFFSET * tjco.normal_z;
-                    next_co.direction[0] = rnx_co;
-                    next_co.direction[1] = rny_co;
-                    next_co.direction[2] = rnz_co;
-                    next_co.intensity    = new_int_co;
-                    next_rays.push_back(next_co);
                 }
             }
 

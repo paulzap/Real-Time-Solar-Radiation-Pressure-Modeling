@@ -42,10 +42,9 @@
 
 #define REFL_BENCH_CUDA_CHECK(ans) { reflBenchGpuAssert((ans), __FILE__, __LINE__); }
 inline void reflBenchGpuAssert(cudaError_t code, const char* file, int line, bool abort_=true) {
-    if (code != cudaSuccess) {
-        fprintf(stderr, "CUDA error: %s %s %d\n", cudaGetErrorString(code), file, line);
-        if (abort_) exit(code);
-    }
+    if (code != cudaSuccess && abort_)
+        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(code) + " at " +
+                                 file + ":" + std::to_string(line));
 }
 
 // ---------------------- GPU structures (float, same as original) ----------------------
@@ -101,11 +100,12 @@ __device__ static inline bool reflBenchRayTriangleIntersect(
     const float v0[3], const float v1[3], const float v2[3], float& t)
 {
     const float EPS = 1e-8f;
+    const float DET_EPS = 1e-13f;   // 2 * area * cos, m^2
     float e1[3] = { v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2] };
     float e2[3] = { v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2] };
     float h[3] = { dir[1]*e2[2]-dir[2]*e2[1], dir[2]*e2[0]-dir[0]*e2[2], dir[0]*e2[1]-dir[1]*e2[0] };
     float a = e1[0]*h[0] + e1[1]*h[1] + e1[2]*h[2];
-    if (fabsf(a) < EPS) return false;
+    if (fabsf(a) < DET_EPS) return false;
     float f = 1.0f / a;
     float s[3] = { origin[0]-v0[0], origin[1]-v0[1], origin[2]-v0[2] };
     float u = f * (s[0]*h[0] + s[1]*h[1] + s[2]*h[2]);
@@ -164,9 +164,6 @@ __global__ void reflShadowBenchKernel_global(
         if (node.is_leaf) {
             unsigned int j = node.triangle_idx;
             if (i == j) continue;
-            float diff[3] = { centers[j*3]-origin[0], centers[j*3+1]-origin[1], centers[j*3+2]-origin[2] };
-            float proj = diff[0]*dir[0]+diff[1]*dir[1]+diff[2]*dir[2];
-            if (proj <= 1e-5f) continue;
             float v0[3]={triangles[j].v[0][0],triangles[j].v[0][1],triangles[j].v[0][2]};
             float v1[3]={triangles[j].v[1][0],triangles[j].v[1][1],triangles[j].v[1][2]};
             float v2[3]={triangles[j].v[2][0],triangles[j].v[2][1],triangles[j].v[2][2]};
@@ -209,9 +206,6 @@ __global__ void reflShadowBenchKernel_constant(
         if (node.is_leaf) {
             unsigned int j = node.triangle_idx;
             if (i == j) continue;
-            float diff[3] = { centers[j*3]-origin[0], centers[j*3+1]-origin[1], centers[j*3+2]-origin[2] };
-            float proj = diff[0]*dir[0]+diff[1]*dir[1]+diff[2]*dir[2];
-            if (proj <= 1e-5f) continue;
             float v0[3]={triangles[j].v[0][0],triangles[j].v[0][1],triangles[j].v[0][2]};
             float v1[3]={triangles[j].v[1][0],triangles[j].v[1][1],triangles[j].v[1][2]};
             float v2[3]={triangles[j].v[2][0],triangles[j].v[2][1],triangles[j].v[2][2]};
@@ -367,7 +361,7 @@ __global__ void reflTraceAndBounceBenchKernel(
     atomicAdd(&moment_accum[2], (double)(hit_j[0]*fy - hit_j[1]*fx));   //PHY
 
     float new_intensity = intensity * alpha_j * mu_j;
-    if (new_intensity < 1e-10f) return;
+    if (new_intensity < 1e-30f) return;
     float rnx=2.0f*cos_theta_j*nj[0]-s_eq[0], rny=2.0f*cos_theta_j*nj[1]-s_eq[1], rnz=2.0f*cos_theta_j*nj[2]-s_eq[2];
     float rnlen=sqrtf(rnx*rnx+rny*rny+rnz*rnz);
     if (rnlen < 1e-12f) return;
@@ -719,9 +713,6 @@ __device__ static bool rbPartsShadowed(
             if (node.is_leaf) {
                 unsigned int j = node.triangle_idx;
                 if (i == j) continue;
-                float diff[3] = { centers[j*3]-origin[0], centers[j*3+1]-origin[1], centers[j*3+2]-origin[2] };
-                float proj = diff[0]*dir[0]+diff[1]*dir[1]+diff[2]*dir[2];
-                if (proj <= 1e-5f) continue;
                 float t;
                 if (reflBenchRayTriangleIntersect(ol, dl, triangles[j].v[0], triangles[j].v[1], triangles[j].v[2], t))
                     return true;
@@ -843,7 +834,7 @@ __global__ void reflTraceAndBounceBenchKernel_parts(
     atomicAdd(&moment_accum[2], (double)(hit_j[0]*fy - hit_j[1]*fx));   //PHY
 
     float new_intensity = intensity * alpha_j * mu_j;
-    if (new_intensity < 1e-10f) return;
+    if (new_intensity < 1e-30f) return;
     float rnx=2.0f*cos_theta_j*nj[0]-s_eq[0], rny=2.0f*cos_theta_j*nj[1]-s_eq[1], rnz=2.0f*cos_theta_j*nj[2]-s_eq[2];
     float rnlen=sqrtf(rnx*rnx+rny*rny+rnz*rnz);
     if (rnlen < 1e-12f) return;
