@@ -231,7 +231,6 @@ __global__ void reflGenerateFirstBounceBenchKernel(
     const float* __restrict__ centers,
     size_t N,
     float sunX, float sunY, float sunZ,
-    float default_alpha, float default_mu,
     float* __restrict__ ray_origins,
     float* __restrict__ ray_dirs,
     float* __restrict__ ray_intensities,
@@ -245,7 +244,6 @@ __global__ void reflGenerateFirstBounceBenchKernel(
 
     float alpha_i = triangles[i].reflectance;
     float mu_i    = triangles[i].specularity;
-    if (alpha_i <= 0.0f && mu_i <= 0.0f) { alpha_i = default_alpha; mu_i = default_mu; }
 
     float nx = triangles[i].normal[0], ny = triangles[i].normal[1], nz = triangles[i].normal[2];
     float cos_theta = nx*sunX + ny*sunY + nz*sunZ;
@@ -296,7 +294,6 @@ __global__ void reflTraceAndBounceBenchKernel(
     const float* __restrict__ centers,
     size_t N,
     unsigned int root_idx,
-    float default_alpha, float default_mu,
     double* __restrict__ force_accum,
     double* __restrict__ moment_accum,
     float* __restrict__ next_ray_origins,
@@ -351,7 +348,6 @@ __global__ void reflTraceAndBounceBenchKernel(
     // NO atomicCAS bounce tracking
     float alpha_j = triangles[j].reflectance;
     float mu_j    = triangles[j].specularity;
-    if (alpha_j <= 0.0f && mu_j <= 0.0f) { alpha_j = default_alpha; mu_j = default_mu; }
 
     // intensity already carries A_i*cos_theta_i*alpha_i*mu_i chain - beam cross-section conserved  //PHY
     float base    = intensity;                                                                        //PHY
@@ -399,7 +395,6 @@ __global__ void reflDirectForceBenchKernel(
     const int*   __restrict__ labels,
     size_t N,
     float sunX, float sunY, float sunZ,
-    float default_alpha, float default_mu,
     double* __restrict__ force_accum,
     double* __restrict__ moment_accum)
 {
@@ -412,7 +407,6 @@ __global__ void reflDirectForceBenchKernel(
 
     float alpha = triangles[i].reflectance;
     float mu    = triangles[i].specularity;
-    if (alpha <= 0.0f && mu <= 0.0f) { alpha = default_alpha; mu = default_mu; }
 
     float area = triangles[i].area;
     if (area <= 0.0f) {
@@ -515,7 +509,6 @@ SRPResult calculate_labels_reflections_gpu_bench(
 {
     if (triangles.empty()) return {};
 
-    const float default_alpha = 0.5f, default_mu = 0.5f;
 
     double len = sqrt(sun_vector[0]*sun_vector[0] + sun_vector[1]*sun_vector[1] + sun_vector[2]*sun_vector[2]);
     if (len < 1e-12) throw std::runtime_error("Sun vector is zero");
@@ -641,7 +634,7 @@ SRPResult calculate_labels_reflections_gpu_bench(
     // Compute direct SRP force on GPU (replaces CPU compute_srp_forces)
     reflDirectForceBenchKernel<<<gridSize,blockSize,0,c.stream>>>(
         c.d_tri, c.d_centers, c.d_labels, N, sunX, sunY, sunZ,
-        default_alpha, default_mu, c.d_force_accum, c.d_moment_accum);
+        c.d_force_accum, c.d_moment_accum);
     REFL_BENCH_CUDA_CHECK(cudaGetLastError());
 
     // =============== Phase 2: Reflections (skipped when max_reflections==0) ===============
@@ -649,7 +642,7 @@ SRPResult calculate_labels_reflections_gpu_bench(
         REFL_BENCH_CUDA_CHECK(cudaMemsetAsync(c.d_ray_count_A,  0, sizeof(unsigned int), c.stream));
 
         reflGenerateFirstBounceBenchKernel<<<gridSize,blockSize,0,c.stream>>>(
-            c.d_tri, c.d_labels, c.d_centers, N, sunX,sunY,sunZ, default_alpha,default_mu,
+            c.d_tri, c.d_labels, c.d_centers, N, sunX,sunY,sunZ,
             c.d_ray_origins_A, c.d_ray_dirs_A, c.d_ray_intensities_A, c.d_ray_sources_A, c.d_ray_count_A);
         REFL_BENCH_CUDA_CHECK(cudaGetLastError());
 
@@ -668,7 +661,7 @@ SRPResult calculate_labels_reflections_gpu_bench(
             int rgs=(int)((h_ray_count+rbs-1)/rbs);
             reflTraceAndBounceBenchKernel<<<rgs,rbs,0,c.stream>>>(
                 cur_origins,cur_dirs,cur_int,cur_src,h_ray_count,
-                c.d_tri,c.d_nodes,c.d_centers,N,c.root_idx,default_alpha,default_mu,
+                c.d_tri,c.d_nodes,c.d_centers,N,c.root_idx,
                 c.d_force_accum,c.d_moment_accum,
                 nxt_origins,nxt_dirs,nxt_int,nxt_src,nxt_cnt);
             REFL_BENCH_CUDA_CHECK(cudaGetLastError());
@@ -804,7 +797,6 @@ __global__ void reflTraceAndBounceBenchKernel_parts(
     const TriangleDevReflBench* __restrict__ triangles,
     const BVHNodeDevReflBench* __restrict__ nodes,
     int nparts,
-    float default_alpha, float default_mu,
     double* __restrict__ force_accum,
     double* __restrict__ moment_accum,
     float* __restrict__ next_ray_origins,
@@ -833,7 +825,6 @@ __global__ void reflTraceAndBounceBenchKernel_parts(
 
     float alpha_j = triangles[j].reflectance;
     float mu_j    = triangles[j].specularity;
-    if (alpha_j <= 0.0f && mu_j <= 0.0f) { alpha_j = default_alpha; mu_j = default_mu; }
 
     float base    = intensity;                                                                        //PHY
     float s_coeff = -base * ((1.0f - alpha_j) + alpha_j*(1.0f - mu_j));                             //PHY
@@ -936,7 +927,6 @@ SRPResult calculate_labels_reflections_gpu_bench_parts(
     if (s.instances.size() > SCENE_MAX_PARTS)
         throw std::runtime_error("too many movable components for the GPU part table");
 
-    const float default_alpha = 0.5f, default_mu = 0.5f;
     double len = sqrt(sun_vector[0]*sun_vector[0] + sun_vector[1]*sun_vector[1] + sun_vector[2]*sun_vector[2]);
     if (len < 1e-12) throw std::runtime_error("Sun vector is zero");
     float sunX=(float)(sun_vector[0]/len), sunY=(float)(sun_vector[1]/len), sunZ=(float)(sun_vector[2]/len);
@@ -1055,14 +1045,14 @@ SRPResult calculate_labels_reflections_gpu_bench_parts(
     REFL_BENCH_CUDA_CHECK(cudaGetLastError());
     reflDirectForceBenchKernel<<<gridSize,blockSize,0,c.stream>>>(
         c.d_tri, c.d_centers, c.d_labels, N, sunX, sunY, sunZ,
-        default_alpha, default_mu, c.d_force_accum, c.d_moment_accum);
+        c.d_force_accum, c.d_moment_accum);
     REFL_BENCH_CUDA_CHECK(cudaGetLastError());
 
     // =============== Phase 2: Reflections ===============
     if (max_reflections > 0) {
         REFL_BENCH_CUDA_CHECK(cudaMemsetAsync(c.d_ray_count_A,  0, sizeof(unsigned int), c.stream));
         reflGenerateFirstBounceBenchKernel<<<gridSize,blockSize,0,c.stream>>>(
-            c.d_tri, c.d_labels, c.d_centers, N, sunX,sunY,sunZ, default_alpha,default_mu,
+            c.d_tri, c.d_labels, c.d_centers, N, sunX,sunY,sunZ,
             c.d_ray_origins_A, c.d_ray_dirs_A, c.d_ray_intensities_A, c.d_ray_sources_A, c.d_ray_count_A);
         REFL_BENCH_CUDA_CHECK(cudaGetLastError());
 
@@ -1081,7 +1071,7 @@ SRPResult calculate_labels_reflections_gpu_bench_parts(
             int rgs=(int)((h_ray_count+rbs-1)/rbs);
             reflTraceAndBounceBenchKernel_parts<<<rgs,rbs,0,c.stream>>>(
                 cur_origins,cur_dirs,cur_int,cur_src,h_ray_count,
-                c.d_tri,c.d_nodes,c.nparts,default_alpha,default_mu,
+                c.d_tri,c.d_nodes,c.nparts,
                 c.d_force_accum,c.d_moment_accum,
                 nxt_origins,nxt_dirs,nxt_int,nxt_src,nxt_cnt);
             REFL_BENCH_CUDA_CHECK(cudaGetLastError());

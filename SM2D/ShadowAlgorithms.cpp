@@ -27,7 +27,6 @@ double g_srp_phi0 = 1.0;        // dimensionless (set to 4.56e-6 N/m² for physi
 // ---------------------------------------------------------------------------
 // Solar Radiation Pressure (SRP) force/moment computation
 // Uses per-triangle optical properties from HDF5 (reflectance = rho, specularity = s).
-// Falls back to alpha=0.5, mu=0.5 for legacy CSV data (where reflectance=specularity=0).
 // ---------------------------------------------------------------------------
 SRPResult compute_srp_forces(
     const std::vector<Triangle>& triangles,
@@ -48,9 +47,9 @@ SRPResult compute_srp_forces(
         double cos_theta = nx * sun_x + ny * sun_y + nz * sun_z;
         if (cos_theta <= 0.0) continue;  // back-facing (safety check)
 
-        // Per-triangle optical properties (fall back to 0.5/0.5 for legacy CSV)
-        double alpha = (t.reflectance > 0.0 || t.specularity > 0.0) ? t.reflectance : 0.5;
-        double mu    = (t.reflectance > 0.0 || t.specularity > 0.0) ? t.specularity : 0.5;
+        // Per-triangle optical properties
+        double alpha = t.reflectance;
+        double mu    = t.specularity;
 
         // Triangle area - use precomputed if available, else compute from vertices
         double A = t.area;

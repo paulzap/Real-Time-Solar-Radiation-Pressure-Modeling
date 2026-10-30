@@ -133,8 +133,6 @@ SRPResult calculate_labels_ray_casting_reflections(
     if (triangles.empty())
         return {};
 
-    const double default_alpha = 0.5;
-    const double default_mu    = 0.5;
     const double phi0  = g_srp_phi0;
     const double MIN_INTENSITY = 1e-10;
 
@@ -373,11 +371,9 @@ SRPResult calculate_labels_ray_casting_reflections(
         if (rlen < 1e-12) continue;
         rx /= rlen;  ry /= rlen;  rz /= rlen;
 
-        // Per-triangle optical properties (fall back to defaults for legacy CSV)
-        double alpha_i = (triangles[i].reflectance > 0.0 || triangles[i].specularity > 0.0)
-            ? triangles[i].reflectance : default_alpha;
-        double mu_i    = (triangles[i].reflectance > 0.0 || triangles[i].specularity > 0.0)
-            ? triangles[i].specularity : default_mu;
+        // Per-triangle optical properties
+        double alpha_i = triangles[i].reflectance;
+        double mu_i    = triangles[i].specularity;
         // Reflected ray TOTAL POWER (W): the polygon intercepts phi0*A_i*cos_theta of solar
         // power, of which alpha*mu is specularly reflected into the single representative ray.
         // (Previously this stored only the flux density phi0*alpha*mu, and the per-hit force
@@ -465,10 +461,8 @@ SRPResult calculate_labels_ray_casting_reflections(
 
             // ---- Accumulate SRP force from reflected light on hit polygon ----
             // Per-triangle optical properties of the hit triangle
-            double alpha_j = (tj.reflectance > 0.0 || tj.specularity > 0.0)
-                ? tj.reflectance : default_alpha;
-            double mu_j    = (tj.reflectance > 0.0 || tj.specularity > 0.0)
-                ? tj.specularity : default_mu;
+            double alpha_j = tj.reflectance;
+            double mu_j    = tj.specularity;
 
             // SRP force: ray.intensity = phi0 * A_emitter * cos_emitter * alpha * mu — beam
             // cross-section is conserved through specular bounces. NOT multiplied by A_j * cos_j.
@@ -530,10 +524,8 @@ SRPResult calculate_labels_ray_casting_reflections(
                     }
                     result.labels[jco] = 1;
 
-                    double alpha_co = (tjco.reflectance > 0.0 || tjco.specularity > 0.0)
-                        ? tjco.reflectance : default_alpha;
-                    double mu_co = (tjco.reflectance > 0.0 || tjco.specularity > 0.0)
-                        ? tjco.specularity : default_mu;
+                    double alpha_co = tjco.reflectance;
+                    double mu_co = tjco.specularity;
                     double base_co = ray.intensity;                                                                          //PHY
                     double sc_co   = -base_co * ((1.0 - alpha_co) + alpha_co*(1.0 - mu_co));                               //PHY
                     double nc_co   = -base_co * (2.0*alpha_co*mu_co*cos_co + (2.0/3.0)*alpha_co*(1.0 - mu_co));            //PHY

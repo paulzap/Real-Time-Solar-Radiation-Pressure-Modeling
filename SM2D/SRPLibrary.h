@@ -70,8 +70,10 @@ struct Triangle {
     // Optical surface properties (per SatForm3D physical model):
     //   reflectance rho in [0,1]  - fraction of incident flux reflected
     //   specularity s   in [0,1]  - of reflected, fraction that is specular
-    //   emissivity  eps in [0,1]  - thermal emission efficiency
+    //   emissivity  eps in [0,1]  - thermal emission efficiency; stored, but
+    //                               not used by any force formula
     //   SRP: specular = rho*s,  diffuse = rho*(1-s),  absorbed = 1-rho
+    //   rho = 0 is a black surface, whatever s is
     double reflectance = 0.0;
     double specularity = 0.0;
     double emissivity  = 0.0;

@@ -87,7 +87,21 @@ endif()
 if(SM3D_ENABLE_CUDA)
     find_package(CUDAToolkit QUIET)
     if(CUDAToolkit_FOUND)
+        # Must come before enable_language(CUDA): from there on CMake defines the
+        # variable itself with the compiler's default, sm_52 up to CUDA 12.
+        if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
+            set(CMAKE_CUDA_ARCHITECTURES "75;86;89")
+        endif()
         enable_language(CUDA)
+        # The kernels use atomicAdd on double, which needs sm_60 or newer.
+        foreach(_srp_arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
+            if(_srp_arch MATCHES "^[0-9]+$" AND _srp_arch LESS 60)
+                message(FATAL_ERROR
+                    "SolaRT needs CUDA architecture 60 or newer, got ${_srp_arch}. "
+                    "Pass -DCMAKE_CUDA_ARCHITECTURES=<architecture> (nvidia-smi --query-gpu=compute_cap) "
+                    "or delete the build folder if it was configured by an older version.")
+            endif()
+        endforeach()
         set(SM3D_HAS_CUDA TRUE)
         message(STATUS "SM3D: CUDA ${CUDAToolkit_VERSION} found — CentroidGPU/PixelGridGPU enabled")
     else()
@@ -194,9 +208,6 @@ if(SM3D_HAS_CUDA)
     # BVH arrays into one image at device-link time, exceeding the 64 KB
     # constant-memory limit (nvlink: "too much global constant data").
     set_target_properties(srp PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
-    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-        set_target_properties(srp PROPERTIES CUDA_ARCHITECTURES "75;86;89")
-    endif()
 endif()
 
 # OptiX

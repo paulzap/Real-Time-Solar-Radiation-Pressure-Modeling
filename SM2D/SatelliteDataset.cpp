@@ -982,6 +982,13 @@ void SatelliteDataset::rebuildTriangles(
         if (!node.has_mesh) continue;
         const int M = static_cast<int>(node.tri_indices.size());
 
+        // reflectance = specularity = 0 is a legal black surface, so a short
+        // array must not read as zero
+        if (first_build && (static_cast<int>(node.reflectance.size()) < M ||
+                            static_cast<int>(node.specularity.size()) < M))
+            throw std::runtime_error("Component '" + node.name + "': reflectance and "
+                                     "specularity must have one value per triangle");
+
         for (int t = 0; t < M; ++t) {
             Triangle& tri = triangles_[write_idx];
             const int i0 = node.tri_indices[t][0];
@@ -993,8 +1000,8 @@ void SatelliteDataset::rebuildTriangles(
                 tri.ID             = node.component_type + "_" + std::to_string(write_idx);
                 tri.component_type = node.component_type;
                 tri.component_name = node.name;
-                tri.reflectance    = (t < (int)node.reflectance.size()) ? node.reflectance[t] : 0.0;
-                tri.specularity    = (t < (int)node.specularity.size()) ? node.specularity[t] : 0.0;
+                tri.reflectance    = node.reflectance[t];
+                tri.specularity    = node.specularity[t];
                 tri.emissivity     = (t < (int)node.emissivity.size())  ? node.emissivity[t]  : 0.0;
                 tri.area           = (t < (int)node.areas.size())       ? node.areas[t]       : 0.0;
             }

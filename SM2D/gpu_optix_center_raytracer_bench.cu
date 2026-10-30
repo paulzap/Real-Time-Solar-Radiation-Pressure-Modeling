@@ -268,7 +268,6 @@ __global__ void rtx_center_bench_compute_force(
     double area  = (double)d_areas[i];
     double alpha = (double)d_reflectance[i];
     double mu    = (double)d_specularity[i];
-    if (alpha == 0.0 && mu == 0.0) { alpha = 0.5; mu = 0.5; }  // legacy CSV fallback
 
     double area_w = area * cos_th;
     double sc = -area_w * ((1.0 - alpha) + alpha * (1.0 - mu));

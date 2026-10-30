@@ -24,7 +24,7 @@
 //
 // Reference:
 //   calculate_labels_ray_casting() - single center-ray per polygon (CPU).
-//   Both methods use alpha=0.5, mu=0.5, Phi0=1.
+//   Both methods use the optical properties of each triangle.
 // ---------------------------------------------------------------------------
 
 #include "ShadowAlgorithms.h"
@@ -289,17 +289,6 @@ SRPResult calculate_labels_pixel_grid(
 
     const double phi0 = g_srp_phi0;
     const size_t N = triangles.size();
-
-    // Validate optical properties when reflections are requested
-    if (max_reflections > 0) {
-        bool has_optical_data = false;
-        for (const auto& t : triangles)
-            if (t.reflectance > 0.0 || t.specularity > 0.0) { has_optical_data = true; break; }
-        if (!has_optical_data)
-            throw std::runtime_error(
-                "Reflections requested but all triangles have zero reflectance and specularity. "
-                "Ensure the HDF5 file contains 'reflectance' and 'specularity' datasets.");
-    }
 
     // ------------------------------------------------------------------ //
     // 1. Normalize sun direction                                           //

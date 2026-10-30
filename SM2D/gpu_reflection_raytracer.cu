@@ -262,7 +262,6 @@ __global__ void reflGenerateFirstBounceKernel(
     const float* __restrict__ centers,
     size_t N,
     float sunX, float sunY, float sunZ,
-    float default_alpha, float default_mu,
     // output ray buffers
     float* __restrict__ ray_origins,       // [capacity * 3]
     float* __restrict__ ray_dirs,          // [capacity * 3]
@@ -277,10 +276,9 @@ __global__ void reflGenerateFirstBounceKernel(
     if (i >= N) return;
     if (labels[i] == 0) return;
 
-    // Per-triangle optical properties (fall back to defaults for legacy CSV)
+    // Per-triangle optical properties
     float alpha_i = triangles[i].reflectance;
     float mu_i    = triangles[i].specularity;
-    if (alpha_i <= 0.0f && mu_i <= 0.0f) { alpha_i = default_alpha; mu_i = default_mu; }
 
     float nx = triangles[i].normal[0];
     float ny = triangles[i].normal[1];
@@ -348,8 +346,6 @@ __global__ void reflTraceAndBounceKernel(
     const float* __restrict__ centers,
     size_t N,
     unsigned int root_idx,
-    // SRP default coefficients (fallback for legacy CSV)
-    float default_alpha, float default_mu,
     // accumulated force/moment (atomicAdd)
     float* __restrict__ force_accum,   // [3]
     float* __restrict__ moment_accum,  // [3]
@@ -440,7 +436,6 @@ __global__ void reflTraceAndBounceKernel(
     // Per-triangle optical properties of the HIT triangle
     float alpha_j = triangles[j].reflectance;
     float mu_j    = triangles[j].specularity;
-    if (alpha_j <= 0.0f && mu_j <= 0.0f) { alpha_j = default_alpha; mu_j = default_mu; }
 
     // Use precomputed area if available, otherwise compute from vertices
     float A_j = triangles[j].area;
@@ -558,8 +553,6 @@ SRPResult calculate_labels_ray_casting_reflections_gpu(
     if (triangles.empty())
         return {};
 
-    const float default_alpha = 0.5f;
-    const float default_mu    = 0.5f;
 
     double len = sqrt(sun_vector[0] * sun_vector[0] +
                       sun_vector[1] * sun_vector[1] +
@@ -851,7 +844,7 @@ SRPResult calculate_labels_ray_casting_reflections_gpu(
 
         reflGenerateFirstBounceKernel<<<gridSize, blockSize, 0, g_refl_cache.stream>>>(
             g_refl_cache.d_tri, g_refl_cache.d_labels, g_refl_cache.d_centers, N,
-            sunX, sunY, sunZ, default_alpha, default_mu,
+            sunX, sunY, sunZ,
             g_refl_cache.d_ray_origins_A, g_refl_cache.d_ray_dirs_A,
             g_refl_cache.d_ray_intensities_A, g_refl_cache.d_ray_sources_A,
             g_refl_cache.d_ray_count_A,
@@ -902,7 +895,6 @@ SRPResult calculate_labels_ray_casting_reflections_gpu(
                 h_ray_count,
                 g_refl_cache.d_tri, g_refl_cache.d_nodes, g_refl_cache.d_centers, N,
                 g_refl_cache.root_idx,
-                default_alpha, default_mu,
                 g_refl_cache.d_force_accum, g_refl_cache.d_moment_accum,
                 next_origins, next_dirs, next_intensities, next_sources, next_count,
                 bounce + 1,                      // bounce_level: 1 for first hit, 2 for second, ...
@@ -1100,7 +1092,6 @@ __global__ void reflTraceAndBounceKernel_parts(
     const TriangleDevRefl* __restrict__ triangles,
     const BVHNodeDevRefl* __restrict__ nodes,
     int nparts,
-    float default_alpha, float default_mu,
     float* __restrict__ force_accum,
     float* __restrict__ moment_accum,
     float* __restrict__ next_ray_origins,
@@ -1143,7 +1134,6 @@ __global__ void reflTraceAndBounceKernel_parts(
 
     float alpha_j = triangles[j].reflectance;
     float mu_j    = triangles[j].specularity;
-    if (alpha_j <= 0.0f && mu_j <= 0.0f) { alpha_j = default_alpha; mu_j = default_mu; }
 
 
     float base    = intensity;                                                                         //PHY
@@ -1277,8 +1267,6 @@ SRPResult calculate_labels_ray_casting_reflections_gpu_parts(
     // Body-frame triangles: the direct force is summed on the host, as above.
     const std::vector<Triangle>& triangles = ds.triangles();
 
-    const float default_alpha = 0.5f;
-    const float default_mu    = 0.5f;
     double len = sqrt(sun_vector[0] * sun_vector[0] + sun_vector[1] * sun_vector[1] + sun_vector[2] * sun_vector[2]);
     if (len < 1e-12) throw std::runtime_error("Sun vector is zero");
     double d_sunX = sun_vector[0] / len, d_sunY = sun_vector[1] / len, d_sunZ = sun_vector[2] / len;
@@ -1438,7 +1426,7 @@ SRPResult calculate_labels_ray_casting_reflections_gpu_parts(
         REFL_CUDA_CHECK(cudaMemsetAsync(c.d_origin_pts,    0xFF, N * 3 * sizeof(float), c.stream));
         REFL_CUDA_CHECK(cudaMemsetAsync(c.d_ray_count_A, 0, sizeof(unsigned int), c.stream));
         reflGenerateFirstBounceKernel<<<gridSize, blockSize, 0, c.stream>>>(
-            c.d_tri, c.d_labels, c.d_centers, N, sunX, sunY, sunZ, default_alpha, default_mu,
+            c.d_tri, c.d_labels, c.d_centers, N, sunX, sunY, sunZ,
             c.d_ray_origins_A, c.d_ray_dirs_A, c.d_ray_intensities_A, c.d_ray_sources_A, c.d_ray_count_A,
             c.d_bounce_levels, c.d_incident_dirs);
         REFL_CUDA_CHECK(cudaGetLastError());
@@ -1459,7 +1447,7 @@ SRPResult calculate_labels_ray_casting_reflections_gpu_parts(
             int rgs = (int)((h_ray_count + rbs - 1) / rbs);
             reflTraceAndBounceKernel_parts<<<rgs, rbs, 0, c.stream>>>(
                 cur_origins, cur_dirs, cur_int, cur_src, h_ray_count,
-                c.d_tri, c.d_nodes, c.nparts, default_alpha, default_mu,
+                c.d_tri, c.d_nodes, c.nparts,
                 c.d_force_accum, c.d_moment_accum,
                 nxt_origins, nxt_dirs, nxt_int, nxt_src, nxt_cnt,
                 bounce + 1, c.d_bounce_levels, c.d_incident_dirs, c.d_origin_pts);

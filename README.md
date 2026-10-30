@@ -41,6 +41,15 @@ If you use SolaRT in published work, please cite the paper (`SOLART_CITATION` in
 
 The test geometry has its own DOI and should be cited separately — see [Dataset](#dataset).
 
+### What's new in 1.2.1
+
+- **Black surfaces are computed correctly.** A triangle with reflectance 0 and
+  specularity 0 used to be treated as half-reflecting by the centroid methods.
+  None of the published models has such triangles, so their results stand
+  (`CentroidGPU` moves only in the rounding of `float`, at most 8e-8 of the force).
+- A clean CMake build works without extra flags, and `find_package(SRPLibrary)`
+  works on Windows. See [CHANGELOG.md](CHANGELOG.md).
+
 ### What's new in 1.2.0
 
 - **Articulation is cheap.** Rotating or extending a movable component costs

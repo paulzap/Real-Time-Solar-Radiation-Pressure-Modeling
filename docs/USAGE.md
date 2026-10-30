@@ -106,6 +106,11 @@ The `CMakeLists.txt` auto-detects what's available and enables only the supporte
 | CUDA Toolkit | + `CentroidGPU`, `PixelGridGPU` |
 | CUDA + OptiX | + `CentroidRTX`, `PixelGridRTX` |
 
+By default the CUDA code is built for architectures 75, 86 and 89, which also run on
+newer GPUs. For an older GPU, or to build faster for one GPU, name its architecture:
+`-DCMAKE_CUDA_ARCHITECTURES=70` (`nvidia-smi --query-gpu=compute_cap --format=csv`
+prints 7.0). Architecture 60 is the minimum.
+
 ### Visual Studio (Open Folder)
 
 This is the easiest path on Windows — no new `.sln` needed.
@@ -479,6 +484,16 @@ int illuminated = std::count(r.labels.begin(), r.labels.end(), 1);
 std::cout << illuminated << " / " << r.labels.size() << " triangles illuminated\n";
 ```
 
+`compute()` fills `labels` on the CPU methods only; on GPU and RTX methods it leaves them
+empty for speed, and `computeViz()` returns them. The labels of the pixel-grid methods
+mark the triangles hit by a ray, so with a grid step larger than a triangle most lit
+triangles stay at 0. The force is still right, because it is summed over rays; do not
+use these labels as a map of illumination.
+
+**Numerical floor.** GPU and RTX methods keep the geometry and optics in `float` on the
+device, so their results agree with the CPU methods to about 1e-7 at best, although
+the kernels accumulate in `double`.
+
 ---
 
 ### Triangle
@@ -497,11 +512,15 @@ struct Triangle {
     double       label;                             // 1 = illuminated, 0 = shadowed
     double       reflectance;   // α ∈ [0,1] — fraction of flux reflected
     double       specularity;   // μ ∈ [0,1] — of reflected, fraction specular
-    double       emissivity;    // ε ∈ [0,1] — thermal emission efficiency
+    double       emissivity;    // ε ∈ [0,1] — stored, not used in any force formula
     double       area;          // m²
     double       centroid_x, centroid_y, centroid_z;
 };
 ```
+
+The optics are used exactly as the file gives them: α = 0 is a black surface for any μ.
+A file whose `reflectance` or `specularity` array is shorter than the triangle list is
+refused when it is loaded.
 
 ---
 

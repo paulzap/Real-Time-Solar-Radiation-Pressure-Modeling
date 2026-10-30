@@ -6,20 +6,45 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [1.2.1] — 2026-10-30
 
-Attribution only: the computation code is not touched, and results and timings
-are those of 1.2.0. The licence stays MIT.
+### Fixed
 
-### Added
-
-- Every source file starts with the authorship line, the SPDX licence identifier
-  and the paper to cite.
-- `SOLART_CITATION` in `SRPLibrary.h`: the reference to cite, as a string.
-- The demo programs print that reference when they start. The library itself
-  prints nothing.
+- **A black surface was computed as a half-reflecting one.** A triangle with
+  reflectance 0 and specularity 0 got 0.5 / 0.5 in the centroid methods, a
+  substitution left from the CSV input that no longer exists; the pixel-grid methods
+  used the true zeros, so the two families disagreed (a closed black cube: 1.42 against
+  the exact 1.00). The optics are now used as given in all six methods. None of the
+  published datasets has such triangles (all 100 models of the article's dataset, 52
+  million triangles, were checked), so their results stand: `CentroidCPU` is bitwise the
+  same, `CentroidRTX` and the pixel-grid methods agree within run-to-run noise, and
+  `CentroidGPU` moves only in the rounding of `float` (at most 8e-8 of the force) because
+  its kernels were recompiled; its difference from `CentroidCPU` is unchanged.
+- Pixel-grid methods refused reflections on a fully black model; they now accept it.
+- **A clean CMake build failed** with `atomicAdd` errors: the guard that chooses the CUDA
+  architectures could never fire, and the code was built for sm_52. The default is now
+  really 75, 86 and 89, and an architecture below 60 stops with a clear message.
+  `setup.ps1` passes the architecture it detects.
+- `find_package(SRPLibrary)` failed on Windows: `setup.ps1` wrote the vcpkg path with
+  backslashes into `SRPLibraryConfig.cmake`. The generated configs of both setup scripts
+  no longer call `cmake_minimum_required()`, which reset the policies of the user's project.
 
 ### Changed
 
+- A file whose `reflectance` or `specularity` array is shorter than its triangle list is
+  refused at load time; such triangles used to read as zero without notice.
 - The citation section of the README moved up, right under the introduction.
+
+### Added
+
+- Every source file starts with the authorship line, the SPDX licence identifier and the
+  paper to cite.
+- `SOLART_CITATION` in `SRPLibrary.h`: the reference to cite, as a string.
+- The demo programs print that reference when they start. The library itself prints
+  nothing.
+
+### Documentation
+
+- `emissivity` is stored but takes no part in the force; GPU and RTX results have a
+  numerical floor of about 1e-7; pixel-grid labels are not a map of illumination.
 
 ## [1.2.0] — 2026-10-29
 

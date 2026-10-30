@@ -513,17 +513,6 @@ SRPResult calculate_labels_pixel_grid_gpu(
 
     const size_t N = triangles.size();
 
-    // Validate optical properties when reflections are requested
-    if (max_reflections > 0) {
-        bool has_optical_data = false;
-        for (const auto& t : triangles)
-            if (t.reflectance > 0.0 || t.specularity > 0.0) { has_optical_data = true; break; }
-        if (!has_optical_data)
-            throw std::runtime_error(
-                "Reflections requested but all triangles have zero reflectance and specularity. "
-                "Ensure the HDF5 file contains 'reflectance' and 'specularity' datasets.");
-    }
-
     // ------------------------------------------------------------------ //
     // Normalize sun direction (now double)
     // ------------------------------------------------------------------ //
@@ -1263,16 +1252,6 @@ SRPResult calculate_labels_pixel_grid_gpu_parts(
     const size_t N = s.N;
     // optics and component names (the geometry itself comes from the scene)
     const std::vector<Triangle>& triangles = ds.triangles();
-
-    if (max_reflections > 0) {
-        bool has_optical_data = false;
-        for (const auto& t : triangles)
-            if (t.reflectance > 0.0 || t.specularity > 0.0) { has_optical_data = true; break; }
-        if (!has_optical_data)
-            throw std::runtime_error(
-                "Reflections requested but all triangles have zero reflectance and specularity. "
-                "Ensure the HDF5 file contains 'reflectance' and 'specularity' datasets.");
-    }
 
     double slen = std::sqrt(sun_vector[0] * sun_vector[0] +
         sun_vector[1] * sun_vector[1] +
