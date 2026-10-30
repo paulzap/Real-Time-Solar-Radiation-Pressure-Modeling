@@ -14,7 +14,7 @@ of the article.
 
 **Numbers on the 100 models of the article's dataset** (5 random Sun directions each, 0 and 3
 reflections, against 1.2.0): `PixelGridGPU` and `PixelGridRTX` agree within run-to-run noise.
-`CentroidRTX` moves by at most 9e-6 of the force and 1.9e-4 of the moment, `CentroidGPU` by at
+`CentroidRTX` moves by about 1e-5 of the force and 2e-4 of the moment at most, `CentroidGPU` by at
 most 6.6e-5 and 4.6e-3, `CentroidCPU` by at most 7.2e-4 and 6.9e-3.
 
 **On the newer SatForm3D models with few large triangles** the changes are larger: half of the
@@ -43,7 +43,7 @@ and a pixel-grid method should be used there.
 - **`CentroidCPU` and `CentroidGPU` missed shadows from a triangle whose centre lies behind
   the point**, because of a filter on the centre that `CentroidRTX` does not have. Together with
   the fix of `CentroidRTX` below, the three now agree: on the newer models from up to 10.6 % of
-  the force down to 6e-5.
+  the force down to about 1e-4.
 - **`CentroidCPU` reflections now match `CentroidGPU` and `CentroidRTX`:** moment arm and next
   ray start at the actual hit point rather than the centre of the triangle (up to 2.7 % of
   the force on models with large triangles), the same surface offset, and a ray on a shared

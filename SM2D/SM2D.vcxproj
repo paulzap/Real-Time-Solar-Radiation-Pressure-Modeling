@@ -114,14 +114,14 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(CUDA_PATH)\lib\x64;$(PythonRoot)\libs;$(VcpkgRoot)\installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5_D.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5.lib</AdditionalDependencies>
     </Link>
     <CudaCompile>
       <CodeGeneration>$(GpuArch);</CodeGeneration>
       <Include>$(OptixRoot)\include;</Include>
     </CudaCompile>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\debug\bin\hdf5_D.dll" "$(OutDir)"</Command>
+      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\debug\bin\hdf5.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -166,14 +166,14 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(CUDA_PATH)\lib\x64;$(PythonRoot)\libs;$(VcpkgRoot)\installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5_D.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cuda.lib;%(AdditionalDependencies);$(PythonLib);cuda.lib;cudart.lib;nvml.lib;hdf5.lib</AdditionalDependencies>
     </Link>
     <CudaCompile>
       <CodeGeneration>$(GpuArch);</CodeGeneration>
       <Include>$(OptixRoot)\include;</Include>
     </CudaCompile>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\debug\bin\hdf5_D.dll" "$(OutDir)"</Command>
+      <Command>xcopy /Y /D "$(VcpkgRoot)\installed\x64-windows\debug\bin\hdf5.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">

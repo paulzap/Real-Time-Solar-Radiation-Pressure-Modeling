@@ -477,8 +477,8 @@ struct SRPResult {
 
 // Reading results
 SRPResult r = engine.compute(SRPMethod::CentroidGPU);
-std::cout << "Force:  " << r.total_force[0]  << " " << r.total_force[1]  << " " << r.total_force[2]  << " N\n";
-std::cout << "Moment: " << r.total_moment[0] << " " << r.total_moment[1] << " " << r.total_moment[2] << " N·m\n";
+std::cout << "Force:  " << r.total_force[0]  << " " << r.total_force[1]  << " " << r.total_force[2]  << "\n";
+std::cout << "Moment: " << r.total_moment[0] << " " << r.total_moment[1] << " " << r.total_moment[2] << "\n";
 
 int illuminated = std::count(r.labels.begin(), r.labels.end(), 1);
 std::cout << illuminated << " / " << r.labels.size() << " triangles illuminated\n";

@@ -743,14 +743,14 @@ if(NOT TARGET SRPLibrary::srp)
                 INTERFACE_LINK_LIBRARIES `${_srp_cuda})
         endif()
     endforeach()
-    if(Python3_FOUND AND EXISTS "`${_SRP_DIR}/python/visualize3d.py")
+    # pyconfig.h asks the linker for the library of the Python used for the build, so only
+    # its folder is needed; a second Python from the user's toolchain would mix two runtimes
+    if(EXISTS "`${_SRP_DIR}/python/visualize3d.py" AND EXISTS "$pythonLibDir")
+        set_property(TARGET SRPLibrary::srp APPEND PROPERTY
+            INTERFACE_LINK_DIRECTORIES "$pythonLibDir")
+    elseif(Python3_FOUND AND EXISTS "`${_SRP_DIR}/python/visualize3d.py")
         set_property(TARGET SRPLibrary::srp APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES Python3::Python)
-        # pyconfig.h asks the linker for the library of the Python used for the build
-        if(EXISTS "$pythonLibDir")
-            set_property(TARGET SRPLibrary::srp APPEND PROPERTY
-                INTERFACE_LINK_DIRECTORIES "$pythonLibDir")
-        endif()
     endif()
 endif()
 "@

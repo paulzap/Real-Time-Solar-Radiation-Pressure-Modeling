@@ -67,7 +67,8 @@ On Windows the library sets `PYTHONHOME` to the Python it finds; it found the wr
 or none. `SRP_PYTHONHOME` tells it which installation to use.
 
 **Fix:**
-1. Run `.\setup.ps1` — it locates Python for the build.
+1. Run `.\setup.ps1` — it locates Python for the build and sets `PYTHONHOME` in the user
+   environment. On Windows the library still chooses by itself: use `SRP_PYTHONHOME` below.
 2. **Restart Visual Studio** afterwards — VS inherits environment variables
    at launch time, not at runtime.
 3. Or set manually in PowerShell:
