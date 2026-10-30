@@ -63,20 +63,20 @@ configuration is correct — the error only surfaces on complex kernels.
 ### `ModuleNotFoundError: No module named 'encodings'`
 
 The embedded Python interpreter (pybind11) cannot find the standard library.
-`PYTHONHOME` is not set or points to the wrong Python installation.
+On Windows the library sets `PYTHONHOME` to the Python it finds; it found the wrong one
+or none. `SRP_PYTHONHOME` tells it which installation to use.
 
 **Fix:**
-1. Run `.\setup.ps1` — it locates Python and sets `PYTHONHOME` in user
-   environment variables.
+1. Run `.\setup.ps1` — it locates Python for the build.
 2. **Restart Visual Studio** afterwards — VS inherits environment variables
    at launch time, not at runtime.
 3. Or set manually in PowerShell:
    ```powershell
-   [System.Environment]::SetEnvironmentVariable("PYTHONHOME",
+   [System.Environment]::SetEnvironmentVariable("SRP_PYTHONHOME",
        "C:\Users\<you>\AppData\Local\Programs\Python\Python312", "User")
    ```
 4. Alternative: set in VS project settings:
-   `Project → Properties → Debugging → Environment → PYTHONHOME=C:\...\Python312`
+   `Project → Properties → Debugging → Environment → SRP_PYTHONHOME=C:\...\Python312`
 
 ---
 

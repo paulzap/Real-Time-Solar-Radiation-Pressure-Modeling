@@ -88,9 +88,11 @@ __device__ static inline bool pgb_ray_aabb_dev(
 {
     double tmin = 0.0, tmax = 1e30;
     for (int ax = 0; ax < 3; ++ax) {
-        // + 0.0 turns -0 into +0: with -0 a ray in the plane of a box face gives
-        // NaN on one side and -inf on the other, and the box is rejected
-        double inv = 1.0 / (d[ax] + 0.0);
+        if (d[ax] == 0.0) {   // parallel to these faces: 1/d would give NaN on a face
+            if (o[ax] < b[ax] || o[ax] > b[ax + 3]) return false;
+            continue;
+        }
+        double inv = 1.0 / d[ax];
         double lo = (b[ax] - o[ax]) * inv;
         double hi = (b[ax+3] - o[ax]) * inv;
         if (lo > hi) { double tmp = lo; lo = hi; hi = tmp; }
@@ -108,11 +110,12 @@ __device__ static bool pgb_ray_tri_dev(
     double& t_out)
 {
     const double EPS = 1e-8;
+    const double DET_EPS = 1e-15;   // 2 * area * cos, m^2
     double e1[3] = { v1[0]-v0[0], v1[1]-v0[1], v1[2]-v0[2] };
     double e2[3] = { v2[0]-v0[0], v2[1]-v0[1], v2[2]-v0[2] };
     double h[3] = { d[1]*e2[2]-d[2]*e2[1], d[2]*e2[0]-d[0]*e2[2], d[0]*e2[1]-d[1]*e2[0] };
     double a = e1[0]*h[0] + e1[1]*h[1] + e1[2]*h[2];
-    if (fabs(a) < EPS) return false;
+    if (fabs(a) < DET_EPS) return false;
     double f = 1.0 / a;
     double s[3] = { o[0]-v0[0], o[1]-v0[1], o[2]-v0[2] };
     double u = f * (s[0]*h[0] + s[1]*h[1] + s[2]*h[2]);

@@ -22,7 +22,6 @@
 #include <iostream>
 #include <algorithm>
 #include <cstring>
-#include <filesystem>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -50,7 +49,10 @@ std::vector<std::string> ptx_search_paths(const char* file_name)
 #else
     const bool ok = readlink("/proc/self/exe", exe, sizeof(exe) - 1) > 0;
 #endif
-    if (ok) paths.push_back((std::filesystem::path(exe).parent_path() / file_name).string());
+    const std::string exe_path(exe);
+    const size_t slash = exe_path.find_last_of("/\\");
+    if (ok && slash != std::string::npos)
+        paths.push_back(exe_path.substr(0, slash + 1) + file_name);
     return paths;
 }
 

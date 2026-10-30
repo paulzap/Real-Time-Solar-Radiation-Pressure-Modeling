@@ -8,16 +8,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 This release corrects defects found by checking the library against exact answers.
 The results of the article are not put in question: its experiments used random Sun
-directions, and the changes below move them at most in the fifth digit for `CentroidGPU`.
-Version 1.0.0 stays the code of the article.
+directions, and the changes below move them at most in the fifth digit of the force for
+`CentroidGPU` and `CentroidRTX` and the fourth for `CentroidCPU`. Version 1.0.0 stays the code
+of the article.
 
-**Numbers on the 100 models of the article's dataset** (5 Sun directions each, 0 and 3
-reflections, against 1.2.0): `CentroidRTX`, `PixelGridGPU` and `PixelGridRTX` agree within
-run-to-run noise. `CentroidGPU` moves by at most 6.6e-5 of the force and 4.6e-3 of the
-moment, `CentroidCPU` by at most 7.2e-4 and 4.2e-3 (shadow test and reflections below).
-On the newer SatForm3D models, where these effects are larger, half of the models move by
-more than 0.1 % and a few by up to 15 %: re-run results computed there with `CentroidCPU` or
-`CentroidGPU`.
+**Numbers on the 100 models of the article's dataset** (5 random Sun directions each, 0 and 3
+reflections, against 1.2.0): `PixelGridGPU` and `PixelGridRTX` agree within run-to-run noise.
+`CentroidRTX` moves by at most 9e-6 of the force and 1.9e-4 of the moment, `CentroidGPU` by at
+most 6.6e-5 and 4.6e-3, `CentroidCPU` by at most 7.2e-4 and 6.9e-3.
+
+**On the newer SatForm3D models with few large triangles** the changes are larger: half of the
+models move by more than 0.1 %, a few by up to 15 % with `CentroidGPU` and 20 % with
+`CentroidCPU`. Re-run results computed there. The three centroid methods now agree, but they
+are no more accurate than before: one point per triangle is a coarse estimate on such models,
+and a pixel-grid method should be used there.
 
 ### Fixed — wrong numbers
 
@@ -37,8 +41,9 @@ more than 0.1 % and a few by up to 15 %: re-run results computed there with `Cen
   are now used as given in all six methods, and pixel-grid methods accept a fully black model
   with reflections. No published dataset has such triangles.
 - **`CentroidCPU` and `CentroidGPU` missed shadows from a triangle whose centre lies behind
-  the point**, because of a filter on the centre that `CentroidRTX` does not have. The three
-  backends now agree: on the newer models from up to 10.6 % of the force down to 4e-4.
+  the point**, because of a filter on the centre that `CentroidRTX` does not have. Together with
+  the fix of `CentroidRTX` below, the three now agree: on the newer models from up to 10.6 % of
+  the force down to 6e-5.
 - **`CentroidCPU` reflections now match `CentroidGPU` and `CentroidRTX`:** moment arm and next
   ray start at the actual hit point rather than the centre of the triangle (up to 2.7 % of
   the force on models with large triangles), the same surface offset, and a ray on a shared
@@ -46,8 +51,10 @@ more than 0.1 % and a few by up to 15 %: re-run results computed there with `Cen
 - **`g_srp_phi0` is now a pure factor.** On the CPU the chain of reflections was cut at an
   absolute power, so setting it to 4.56e-6 lost later reflections (+36 % on a small mirror
   chain). `PixelGridCPU` is affected the same way; both are fixed.
-- **Small triangles were transparent** to `CentroidCPU` (2 × area below 1e-6 m²) and
-  `CentroidGPU` (below 1e-8 m²).
+- **Small triangles were transparent** to `CentroidCPU` (2 × area below 1e-6 m²), `CentroidGPU`
+  and `PixelGridGPU` (below 1e-8 m²). `PixelGridRTX` missed the top surface with a grid step
+  below 1e-4 m (force 0), and `CentroidRTX` missed an occluder closer than 2e-4 m.
+- `CentroidCPU` lost the reflected light of a file without `areas`.
 - **`compute()` and `computeViz()` of `CentroidGPU` gave different numbers** (up to 0.97 %):
   the shadow and reflected rays of `computeViz()` had no offset from the surface.
 
@@ -60,8 +67,8 @@ more than 0.1 % and a few by up to 15 %: re-run results computed there with `Cen
 - `find_package(SRPLibrary)` failed on Windows because of backslashes in the generated
   `SRPLibraryConfig.cmake`, and could not link the CUDA libraries. The generated configs no
   longer call `cmake_minimum_required()`, which reset the policies of the user's project.
-- `load()` that refused a joint left the dataset inconsistent, and the next `reload()` crashed.
-  The new file now stays loaded, in the pose of the file.
+- A refused file or joint in `load()` or `load_single_file()` left the dataset inconsistent, and
+  the next `reload()` crashed or computed a cut model. A refused load now changes nothing.
 - `CentroidGPU` ended the process on a CUDA error; it now throws `std::runtime_error` like the
   other methods.
 - A short `normals` array or a wrong vertex index in a file crashed; such a file, or one with a

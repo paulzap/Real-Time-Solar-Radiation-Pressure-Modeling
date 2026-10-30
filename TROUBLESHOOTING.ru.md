@@ -79,21 +79,21 @@ OptiX) могут работать в Debug**, создавая иллюзию �
 
 **Решение:**
 
-1. Запустите `.\setup.ps1` — он найдёт Python и установит `PYTHONHOME`
-   в переменных среды пользователя.
+1. Запустите `.\setup.ps1` — он найдёт Python для сборки. Под Windows библиотека сама
+   задаёт `PYTHONHOME`, а нужную установку указывает `SRP_PYTHONHOME`.
 2. **Обязательно перезапустите Visual Studio** после этого — VS наследует
    переменные среды только при своём запуске.
 3. Или задайте вручную в PowerShell:
    ```powershell
    [System.Environment]::SetEnvironmentVariable(
-       "PYTHONHOME",
+       "SRP_PYTHONHOME",
        "C:\Users\YourName\AppData\Local\Programs\Python\Python312",
        "User"
    )
    # После этого перезапустите VS
    ```
 4. Альтернатива: задать в настройках VS для этого проекта:
-   `Project → Properties → Debugging → Environment → PYTHONHOME=C:\...\Python312`
+   `Project → Properties → Debugging → Environment → SRP_PYTHONHOME=C:\...\Python312`
 
 ---
 

@@ -120,19 +120,35 @@ std::string SatelliteDataset::currentFile() const {
 // rebuilt when triangles() is next called, and the GPU methods move the rigid
 // parts of the model without the list at all.
 // =========================================================================
-void SatelliteDataset::load(const std::string& file_path) {
-    current_file_ = file_path;
-    load_h5_into_cache(file_path);   // slow: file read + HDF5 parse, once
-    resetRigidParts();               // before anything can throw: keeps the split sized to the nodes
+// Reads a file and checks the joints against it. If either is refused, the
+// dataset stays exactly as it was: the file is only taken once all of it is good.
+void SatelliteDataset::switchFile(const std::string& file_path,
+                                  const std::map<std::string, JointConfig>& joints) {
+    std::vector<CachedNode> nodes = std::move(cached_nodes_);
+    const std::string file = current_file_;
+    const bool dirty = immutable_dirty_, had_mass = has_mass_;
+    const double mass = mass_;
+    const std::array<double, 3> com = com_;
+    const std::array<double, 9> inertia = inertia_;
     try {
-        for (const auto& [name, jc] : joints_) validateJoint(name, jc, false);
+        current_file_ = file_path;
+        load_h5_into_cache(file_path);   // slow: file read + HDF5 parse, once
+        for (const auto& [name, jc] : joints) validateJoint(name, jc, false);
     } catch (...) {
-        // the new file stays loaded, in its file pose; joints_ still holds what was refused
-        commitJoints({});
-        rebuildTriangles(committed_joints_);
-        triangles_stale_ = false;
+        cached_nodes_    = std::move(nodes);
+        current_file_    = file;
+        immutable_dirty_ = dirty;
+        has_mass_        = had_mass;
+        mass_            = mass;
+        com_             = com;
+        inertia_         = inertia;
         throw;
     }
+    resetRigidParts();
+}
+
+void SatelliteDataset::load(const std::string& file_path) {
+    switchFile(file_path, joints_);
     commitJoints(joints_);
     rebuildTriangles(committed_joints_);
     triangles_stale_ = false;
@@ -510,10 +526,7 @@ void SatelliteDataset::load_single_file(
     for (const auto& [name, jc] : joints_)
         if (!jc_overrides.count(name)) jc_overrides[name] = jc;
 
-    current_file_ = file_path;
-    load_h5_into_cache(file_path);
-    for (const auto& [name, jc] : jc_overrides) validateJoint(name, jc, false);
-    resetRigidParts();
+    switchFile(file_path, jc_overrides);
     commitJoints(jc_overrides);
     rebuildTriangles(committed_joints_);
     triangles_stale_ = false;
@@ -849,7 +862,6 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
             // must not read as zero; the others would run off the end of the array
             const size_t M = node.tri_indices.size();
             const auto bad = [&](const std::string& what) {
-                cached_nodes_.clear();
                 return std::runtime_error("Component '" + node.name + "' in " + file_path + ": " + what);
             };
             if (node.reflectance.size() < M || node.specularity.size() < M)

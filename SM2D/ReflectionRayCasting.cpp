@@ -375,7 +375,15 @@ SRPResult calculate_labels_ray_casting_reflections(
         // (Previously this stored only the flux density phi0*alpha*mu, and the per-hit force
         //  formula compensated by multiplying by A_j*cos_theta_j -- physically wrong unless
         //  A_i*cos_theta_i happens to equal A_j*cos_theta_j. See Li 2018 Eq. (5).)
-        double intensity = phi0 * triangles[i].area * cos_theta * alpha_i * mu_i;
+        double A_i = triangles[i].area;
+        if (A_i <= 0.0) {   // not in the file: from the vertices, as in the direct force
+            const Triangle& t = triangles[i];
+            double e1x = t.v2_x - t.v1_x, e1y = t.v2_y - t.v1_y, e1z = t.v2_z - t.v1_z;
+            double e2x = t.v3_x - t.v1_x, e2y = t.v3_y - t.v1_y, e2z = t.v3_z - t.v1_z;
+            double cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+            A_i = 0.5 * std::sqrt(cx * cx + cy * cy + cz * cz);
+        }
+        double intensity = phi0 * A_i * cos_theta * alpha_i * mu_i;
 
         ReflectionRay ray;
         ray.source_idx  = i;

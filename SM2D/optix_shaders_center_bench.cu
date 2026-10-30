@@ -103,7 +103,7 @@ extern "C" __global__ void __raygen__center_bench() {
     unsigned int prim = 0xFFFFFFFFu, t_bits = 0u;
     optixTrace(
         params.bvh, orig, params.sun,
-        1e-4f, 1e30f, 0.0f,
+        1e-5f, 1e30f, 0.0f,
         OptixVisibilityMask(255),
         OPTIX_RAY_FLAG_DISABLE_ANYHIT,
         0u, 1u, 0u,
@@ -145,7 +145,7 @@ extern "C" __global__ void __raygen__center_bench() {
         unsigned int j_prim = 0xFFFFFFFFu, j_t_bits = 0u;
         optixTrace(
             params.bvh, refl_orig, refl,
-            1e-4f, 1e30f, 0.0f,
+            1e-5f, 1e30f, 0.0f,
             OptixVisibilityMask(255),
             OPTIX_RAY_FLAG_DISABLE_ANYHIT,
             0u, 1u, 0u,

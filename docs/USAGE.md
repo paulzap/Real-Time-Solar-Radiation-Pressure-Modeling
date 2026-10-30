@@ -139,7 +139,7 @@ OPTIX_INSTALL_DIR=C:\path\to\OptiX SDK 9.1.0
 ### VS Code
 
 1. Install extensions: **C/C++**, **CMake Tools**
-2. Open the repo folder: `code e:\GPU_projects\SM3D_GPU_CC10`
+2. Open the repo folder: `code path/to/the/repository`
 3. CMake Tools auto-detects `CMakeLists.txt` — click **Configure** when prompted
 4. Select kit: `Visual Studio Community 2022 Release - x86_amd64` (Windows) or `GCC 12` (Linux)
 5. Set build type to **Release** in the status bar
@@ -494,10 +494,17 @@ use these labels as a map of illumination.
 device, so their results agree with the CPU methods to about 1e-7 at best, although
 the kernels accumulate in `double`.
 
-**Pixel grid along an axis.** With the Sun exactly along a model axis and a mesh aligned
-with that axis, rows of rays can fall exactly on the outline of a surface and be counted
-at full weight. This is an error of the grid, up to about 2 × step / size, not of the
-physics; a smaller step reduces it, and so does any Sun direction off the axis.
+**Choosing a method on large triangles.** A centroid method decides each triangle by one
+point. On a model with few large triangles (a small satellite of a few hundred) the
+error reaches tens of per cent for some directions, and all centroid methods share it.
+Use a pixel-grid method there, with a step of about 1/300 of the model size or finer.
+
+**Pixel-grid sampling.** The rows of the grid run along the projection of a model axis:
+X for `PixelGridCPU` and `PixelGridGPU`, Z for `PixelGridRTX`. A long edge along that axis
+is not averaged out, and the error becomes of the order of step / projected width (up to
+20 % on a long panel at a grazing angle with a step of size/300). With the Sun exactly
+along a model axis and an aligned mesh, rows of rays can also fall exactly on an outline,
+up to about 2 × step / size. A smaller step reduces both.
 
 ---
 
@@ -562,7 +569,7 @@ int main() {
     std::cout << "Force: "
               << r.total_force[0] << "  "
               << r.total_force[1] << "  "
-              << r.total_force[2] << " N\n";
+              << r.total_force[2] << "\n";   // m^2 unless g_srp_phi0 is set
 }
 ```
 
@@ -608,7 +615,7 @@ for (int deg = 0; deg <= 90; deg += 5) {
     double rad = deg * M_PI / 180.0;
     engine.dataset().articulate("SolarPanel_L", JointConfig::rotY(rad));
     SRPResult r = engine.compute(SRPMethod::CentroidGPU);
-    std::cout << deg << "°  Fz=" << r.total_force[2] << " N\n";
+    std::cout << deg << "°  Fz=" << r.total_force[2] << "\n";
 }
 ```
 
@@ -634,7 +641,7 @@ const char* names[] = {
 for (int i = 0; i < 6; ++i) {
     try {
         SRPResult r = engine.compute(methods[i]);
-        std::cout << names[i] << "  Fx=" << r.total_force[0] << " N\n";
+        std::cout << names[i] << "  Fx=" << r.total_force[0] << "\n";
     } catch (const std::runtime_error& e) {
         std::cout << names[i] << "  unavailable: " << e.what() << "\n";
     }
@@ -672,7 +679,7 @@ srp_demo path/to/h5_files
 The numbered sections of the menu demonstrate each part of the API; the letter items
 (C, P, G, W, A, Q) choose the method and settings. Things worth comparing:
 
-- `CentroidCPU` vs `CentroidGPU` vs `CentroidRTX`: force/moment should agree to about 0.01 % or better
+- `CentroidCPU` vs `CentroidGPU` vs `CentroidRTX`: force should agree to about 0.01 % or better, the moment to about 0.1 %
 - The grid of `PixelGridRTX` is turned relative to that of `PixelGridGPU`, so the two sample different rays;
   compare them only within the sampling error of the grid step  
 - `PixelGrid*` vs `Centroid*`: expect differences on satellites with small/thin facets; differences decrease as `grid_step` decreases  
@@ -741,11 +748,11 @@ engine.visualizeLastResult();
 set SRP_PYTHONHOME=C:\Users\you\AppData\Local\Programs\Python\Python312
 
 # Linux / macOS:
-export SRP_PYTHONHOME=/usr/local
+export PYTHONHOME=/usr/local
 ```
 
 Or in VS: **Project → Properties → Debugging → Environment** → add `SRP_PYTHONHOME=C:\...\Python312`.
-On Windows the library overwrites `PYTHONHOME` with the Python it finds; `SRP_PYTHONHOME` chooses that Python.
+On Windows the library sets `PYTHONHOME` to the Python it finds, and `SRP_PYTHONHOME` chooses that Python; on Linux and macOS it reads `PYTHONHOME`.
 
 ### Animation
 

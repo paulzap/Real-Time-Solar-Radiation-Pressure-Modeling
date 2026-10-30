@@ -103,17 +103,14 @@ extern "C" __global__ void __raygen__center() {
     if (cos_th <= 0.0f) return;  // back face
 
     // Shadow ray: from centroid toward sun.
-    // tmin matches the origin offset so that occluders immediately adjacent
-    // to the surface are not skipped.  Using 1e-3f here was 10× larger than
-    // the 1e-4f origin offset and caused nearby panels to be missed as
-    // occluders, making triangles appear directly lit when they are actually
-    // shadowed (wrong yellow instead of correct 2nd-reflection red).
+    // tmin stays well below the origin offset: it adds to the offset, so a
+    // larger one makes occluders close to the surface disappear.
     const float3 orig = add3f(params.d_centroids[tri],
                                scale3f(1e-4f, n_tri));   // offset to avoid self-hit
     unsigned int prim = 0xFFFFFFFFu, t_bits = 0u;
     optixTrace(
         params.bvh, orig, params.sun,
-        1e-4f, 1e30f, 0.0f,
+        1e-5f, 1e30f, 0.0f,
         OptixVisibilityMask(255),
         OPTIX_RAY_FLAG_DISABLE_ANYHIT,
         0u, 1u, 0u,
@@ -170,7 +167,7 @@ extern "C" __global__ void __raygen__center() {
         unsigned int j_prim = 0xFFFFFFFFu, j_t_bits = 0u;
         optixTrace(
             params.bvh, refl_orig, refl,
-            1e-4f, 1e30f, 0.0f,
+            1e-5f, 1e30f, 0.0f,
             OptixVisibilityMask(255),
             OPTIX_RAY_FLAG_DISABLE_ANYHIT,
             0u, 1u, 0u,

@@ -45,10 +45,11 @@ The test geometry has its own DOI and should be cited separately — see [Datase
 
 - **Checked against exact answers, and corrected.** Black surfaces, pixel-grid rays with the
   Sun along an axis, shadows and reflections on the CPU, and a stale geometry case on the GPU
-  gave wrong numbers. The article's results are not put in question: `CentroidRTX` and the
-  pixel-grid methods reproduce them, `CentroidGPU` moves at most in the fifth digit of the
-  force. **On the newer SatForm3D models, re-run what was computed with `CentroidCPU` or
-  `CentroidGPU`.** See [CHANGELOG.md](CHANGELOG.md).
+  gave wrong numbers. The article's results are not put in question: the pixel-grid methods
+  reproduce them, `CentroidRTX` and `CentroidGPU` move at most in the fifth digit of the force
+  and `CentroidCPU` in the fourth. **On the newer SatForm3D models, re-run what was computed
+  with `CentroidCPU` or `CentroidGPU`:** the three centroid methods now agree, though on large
+  triangles they are no more accurate than before. See [CHANGELOG.md](CHANGELOG.md).
 - A clean CMake build works without extra flags.
 
 ### What's new in 1.2.0
@@ -104,7 +105,8 @@ The same triangulation can be evaluated by **six algorithms × two paths**:
 | **PixelGrid**    | `PixelGridCPU` | `PixelGridGPU` | `PixelGridRTX` |
 
 * **Centroid** — one shadow ray per triangle centroid. Linear cost in triangle
-  count, ideal for moderate meshes and large-scale ensemble runs.
+  count, ideal for meshes with small triangles and large-scale ensemble runs; on a few large
+  triangles one point per triangle is a coarse estimate, use a pixel grid there.
 * **PixelGrid** — parallel rays on a 2-D grid perpendicular to the sun. Cost
   scales as 1/step² but resolves sub-triangle illumination and grazing facets
   far more accurately.
@@ -200,10 +202,10 @@ separately on Zenodo:
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20261561.svg)](https://doi.org/10.5281/zenodo.20261561)
 
-Download and extract `.h5` files into `SM2D/data3d_hdf5_0.5/`
-(or pass any folder path to `SRPEngine`). Every version reads this dataset and
-gives the same results on it; the code used for the article is tagged
-`v1.0.0`.
+Download and extract the `.h5` files into any folder and pass its path to
+`SRPEngine`, as `data3d_0.05` in the quickstart. Every version reads this
+dataset; the code used for the article is tagged `v1.0.0`, and later fixes that
+move the numbers are listed in the changelog.
 
 ---
 

@@ -445,6 +445,8 @@ private:
 
     // Read HDF5 file into cached_nodes_ (slow, ~once per file).
     void load_h5_into_cache(const std::string& file_path);
+    void switchFile(const std::string& file_path,
+                    const std::map<std::string, JointConfig>& joints);
 
     // Body transform of every cached node for the given joints.
     std::vector<Mat4> computeBodyTransforms(

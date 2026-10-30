@@ -276,7 +276,8 @@ static SRPResult calculate_labels_pixel_grid_rtx_impl(
         const float v_center = 0.5f * (v_min_ + v_max_);
         const float u_half   = 0.5f * (u_max  - u_min)  + fstep;
         const float v_half   = 0.5f * (v_max_ - v_min_) + fstep;
-        float t_start = s_max_ + fstep;
+        // clear of the 1e-4 tmin of the primary ray, also for a grid finer than that
+        float t_start = s_max_ + (fstep > 2e-4f ? fstep : 2e-4f);
 
         unsigned int nu = (unsigned int)std::ceil(2.0f * u_half / fstep);
         unsigned int nv = (unsigned int)std::ceil(2.0f * v_half / fstep);
