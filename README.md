@@ -18,6 +18,29 @@
 **SolaRT** stands for *Solar radiation pressure on RT cores*; the "RT" is meant
 three ways at once — ray tracing, real time, and the RT cores of NVIDIA GPUs.
 
+### Citation
+
+If you use SolaRT in published work, please cite the paper (`SOLART_CITATION` in the header gives the same reference, and GitHub's "Cite this repository" button gives it in BibTeX and APA):
+
+> Zapevalin, P.R. Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores.
+> *Aerospace Science and Technology*, 2026, 113714.
+> https://doi.org/10.1016/j.ast.2026.113714
+
+```bibtex
+@article{ZAPEVALIN2026113714,
+  title   = {Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores},
+  author  = {P.R. Zapevalin},
+  journal = {Aerospace Science and Technology},
+  year    = {2026},
+  pages   = {113714},
+  issn    = {1270-9638},
+  doi     = {10.1016/j.ast.2026.113714},
+  url     = {https://www.sciencedirect.com/science/article/pii/S1270963826020900}
+}
+```
+
+The test geometry has its own DOI and should be cited separately — see [Dataset](#dataset).
+
 ### What's new in 1.2.0
 
 - **Articulation is cheap.** Rotating or extending a movable component costs
@@ -322,28 +345,3 @@ MIT License — see [LICENSE](LICENSE).
 **Author:** Zapevalin P.R.  
 **Email:** pav9981@yandex.ru  
 **Issues:** open an issue on this repository.
-
----
-
-## Citation
-
-If you use this code in your research, please cite the accompanying paper:
-
-> Zapevalin, P.R. Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores.
-> *Aerospace Science and Technology*, 2026, 113714.
-> https://doi.org/10.1016/j.ast.2026.113714
-
-```bibtex
-@article{ZAPEVALIN2026113714,
-  title   = {Real-Time Solar Radiation Pressure Modeling on GPU RT-Cores},
-  author  = {P.R. Zapevalin},
-  journal = {Aerospace Science and Technology},
-  year    = {2026},
-  pages   = {113714},
-  issn    = {1270-9638},
-  doi     = {10.1016/j.ast.2026.113714},
-  url     = {https://www.sciencedirect.com/science/article/pii/S1270963826020900}
-}
-```
-
-The test geometry has its own DOI and should be cited separately — see [Dataset](#dataset).

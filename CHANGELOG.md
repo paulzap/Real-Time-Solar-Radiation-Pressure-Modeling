@@ -4,6 +4,23 @@ All notable changes to SolaRT (the solar radiation pressure library for GPU RT
 cores, formerly "Solar Radiation Pressure Library — GPU & RT-Cores").
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-10-30
+
+Attribution only: the computation code is not touched, and results and timings
+are those of 1.2.0. The licence stays MIT.
+
+### Added
+
+- Every source file starts with the authorship line, the SPDX licence identifier
+  and the paper to cite.
+- `SOLART_CITATION` in `SRPLibrary.h`: the reference to cite, as a string.
+- The demo programs print that reference when they start. The library itself
+  prints nothing.
+
+### Changed
+
+- The citation section of the README moved up, right under the introduction.
+
 ## [1.2.0] — 2026-10-29
 
 ### Changed — articulation no longer rebuilds the geometry

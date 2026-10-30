@@ -1,3 +1,8 @@
+# SolaRT - solar radiation pressure on GPU RT cores.
+# Copyright (c) 2026 Zapevalin P.R. SPDX-License-Identifier: MIT
+# If you use this code in published work, please cite:
+# https://doi.org/10.1016/j.ast.2026.113714
+
 """
 animate_srp.py
 ==============
@@ -108,6 +113,7 @@ def scene_bounds(geometry, meshes, frames, views):
 
 
 def main():
+    print("SolaRT. Please cite: Zapevalin, P.R., Aerospace Science and Technology, 2026, 113714, https://doi.org/10.1016/j.ast.2026.113714")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('folder')
     ap.add_argument('--style', choices=['tech', 'space'], default='tech', help='look at start')

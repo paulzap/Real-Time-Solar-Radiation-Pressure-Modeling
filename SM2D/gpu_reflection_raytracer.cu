@@ -1,3 +1,8 @@
+// SolaRT - solar radiation pressure on GPU RT cores.
+// Copyright (c) 2026 Zapevalin P.R. SPDX-License-Identifier: MIT
+// If you use this code in published work, please cite:
+// https://doi.org/10.1016/j.ast.2026.113714
+
 // ---------------------------------------------------------------------------
 // gpu_reflection_raytracer.cu
 // Clone of gpu_shadow_raytracer.cu with multi-bounce specular reflections.

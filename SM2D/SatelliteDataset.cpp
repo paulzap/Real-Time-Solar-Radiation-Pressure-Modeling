@@ -1,3 +1,8 @@
+// SolaRT - solar radiation pressure on GPU RT cores.
+// Copyright (c) 2026 Zapevalin P.R. SPDX-License-Identifier: MIT
+// If you use this code in published work, please cite:
+// https://doi.org/10.1016/j.ast.2026.113714
+
 #include "SatelliteDataset.h"
 #include "instance_scene.h"
 #include <stdexcept>

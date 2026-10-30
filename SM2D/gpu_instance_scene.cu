@@ -1,3 +1,8 @@
+// SolaRT - solar radiation pressure on GPU RT cores.
+// Copyright (c) 2026 Zapevalin P.R. SPDX-License-Identifier: MIT
+// If you use this code in published work, please cite:
+// https://doi.org/10.1016/j.ast.2026.113714
+
 // ---------------------------------------------------------------------------
 // gpu_instance_scene.cu - shared device copy of the body-frame centroids and
 // normals for the two-level acceleration structures (see gpu_instance_scene.h).

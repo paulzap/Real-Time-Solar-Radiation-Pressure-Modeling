@@ -1,3 +1,8 @@
+// SolaRT - solar radiation pressure on GPU RT cores.
+// Copyright (c) 2026 Zapevalin P.R. SPDX-License-Identifier: MIT
+// If you use this code in published work, please cite:
+// https://doi.org/10.1016/j.ast.2026.113714
+
 #pragma once
 
 // =============================================================================
@@ -37,8 +42,13 @@
 // Library version (see CHANGELOG.md).
 #define SOLART_VERSION_MAJOR  1
 #define SOLART_VERSION_MINOR  2
-#define SOLART_VERSION_PATCH  0
-#define SOLART_VERSION_STRING "1.2.0"
+#define SOLART_VERSION_PATCH  1
+#define SOLART_VERSION_STRING "1.2.1"
+
+// Reference to cite in published work (see CITATION.cff).
+#define SOLART_CITATION "Zapevalin, P.R. Real-Time Solar Radiation Pressure " \
+    "Modeling on GPU RT-Cores. Aerospace Science and Technology, 2026, 113714. " \
+    "https://doi.org/10.1016/j.ast.2026.113714"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

@@ -1,4 +1,9 @@
-﻿#include "SRPLibrary.h"
+﻿// SolaRT - solar radiation pressure on GPU RT cores.
+// Copyright (c) 2026 Zapevalin P.R. SPDX-License-Identifier: MIT
+// If you use this code in published work, please cite:
+// https://doi.org/10.1016/j.ast.2026.113714
+
+#include "SRPLibrary.h"
 #include "ShadowAlgorithms.h"
 #include "bench_methods.h"
 #include <iostream>
@@ -1550,6 +1555,7 @@ int main(int argc, char* argv[])
         }
         fs::create_directories("results_3d");
 
+        std::cout << "SolaRT " << SOLART_VERSION_STRING << ". Please cite: " << SOLART_CITATION << "\n";
         std::cout << "Loading dataset from: " << folder_path << "\n";
         SRPEngine engine(folder_path);
         std::cout << "Loaded " << engine.dataset().triangleCount()
