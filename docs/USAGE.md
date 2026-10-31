@@ -506,6 +506,11 @@ is not averaged out, and the error becomes of the order of step / projected widt
 along a model axis and an aligned mesh, rows of rays can also fall exactly on an outline,
 up to about 2 × step / size. A smaller step reduces both.
 
+**Note on the article (Section 5.3).** The step in the `PixelGridRTX` error at θ ≈ 25.84° and
+154.16° comes from this difference in grid orientation. At |s_z| > 0.9 `PixelGridRTX` switches
+to the X axis and uses the same grid as the `PixelGridGPU` reference, so its error there is
+close to zero. The measured numbers and the conclusions of the article stand.
+
 **Limits.** `CentroidGPU` and `PixelGridGPU` take at most 63 components out of their file pose
 at once and refuse more with an error; the CPU and RTX methods have no such limit. One call of
 `PixelGridRTX` takes up to about 1e9 rays and refuses more; `PixelGridGPU` is limited by the
