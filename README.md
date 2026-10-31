@@ -41,6 +41,13 @@ If you use SolaRT in published work, please cite the paper (`SOLART_CITATION` in
 
 The test geometry has its own DOI and should be cited separately — see [Dataset](#dataset).
 
+### What's new in 1.2.2
+
+No number changes: this release is about input that used to pass silently and about the build.
+Files and values that would give wrong results are now refused, the moment reference
+follows the file after `load()`, and the Linux build works with HDF5 from the system. See the
+[changelog](CHANGELOG.md).
+
 ### What's new in 1.2.1
 
 - **Checked against exact answers, and corrected.** Black surfaces, pixel-grid rays with the
@@ -83,7 +90,7 @@ The test geometry has its own DOI and should be cited separately — see [Datase
 - Results for fixed (non-articulated) geometry and call times are unchanged.
 
 Full list: [CHANGELOG.md](CHANGELOG.md). Version 1.0.0 is the code that
-accompanies the article; 1.2.1 corrects defects found afterwards, and the
+accompanies the article; 1.2.1 and 1.2.2 correct defects found afterwards, and the
 article's results are not affected by them (see the changelog).
 
 ---

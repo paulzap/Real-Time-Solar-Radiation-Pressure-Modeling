@@ -17,9 +17,11 @@
 #define SCENE_CUDA_CHECK(call)                                                         \
     do {                                                                               \
         cudaError_t err_ = (call);                                                     \
-        if (err_ != cudaSuccess)                                                       \
+        if (err_ != cudaSuccess) {                                                     \
+            (void)cudaGetLastError();   /* or the next good call would read it */      \
             throw std::runtime_error(std::string("CUDA error in gpu_instance_scene: ") + \
                                      cudaGetErrorString(err_));                        \
+        }                                                                              \
     } while (0)
 
 // Body-frame triangle of a movable part: SatelliteDataset::rebuildTriangles /

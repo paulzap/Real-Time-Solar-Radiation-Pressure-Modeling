@@ -283,7 +283,7 @@ double step = engine.getGridStep();
 // Moment reference point, body frame [m] (default: body-frame origin).
 // total_moment of every result is taken about this point.
 engine.setMomentReference(0.40, -0.27, 0.70);
-engine.setMomentReferenceToCenterOfMass();   // CoM from the HDF5 /inertia group
+engine.setMomentReferenceToCenterOfMass();   // CoM from the HDF5 /inertia group; follows load()
 auto ref = engine.getMomentReference();
 
 // Run calculation
@@ -505,6 +505,17 @@ is not averaged out, and the error becomes of the order of step / projected widt
 20 % on a long panel at a grazing angle with a step of size/300). With the Sun exactly
 along a model axis and an aligned mesh, rows of rays can also fall exactly on an outline,
 up to about 2 × step / size. A smaller step reduces both.
+
+**Limits.** `CentroidGPU` and `PixelGridGPU` take at most 63 components out of their file pose
+at once and refuse more with an error; the CPU and RTX methods have no such limit. One call of
+`PixelGridRTX` takes up to about 1e9 rays and refuses more; `PixelGridGPU` is limited by the
+memory of the graphics card.
+
+**What a file must hold.** A file is refused if it has no triangles, if a component names an
+`instance_key` that is not in `/prototypes`, or if `T_local_offset` is anything but a rotation
+and a translation (a scale would disagree with the areas stored in the file). A group with a mesh
+and no `joint_type` is a fixed component. Components of the same name load normally, but none of
+them can be articulated, because the name does not say which is meant.
 
 ---
 

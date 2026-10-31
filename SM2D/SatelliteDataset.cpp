@@ -85,15 +85,21 @@ void SatelliteDataset::setFolder(const std::string& folder_path) {
 }
 
 void SatelliteDataset::scanFolder(const std::string& folder_path) {
-    file_names_.clear();
+    // A path to one file is a list of that file.
+    if (std::filesystem::is_regular_file(folder_path)) {
+        file_names_ = { folder_path };
+        return;
+    }
+    std::vector<std::string> names;
     for (const auto& entry : std::filesystem::directory_iterator(folder_path)) {
         auto ext = entry.path().extension().string();
         if (ext == ".h5" || ext == ".hdf5")
-            file_names_.push_back(entry.path().string());
+            names.push_back(entry.path().string());
     }
-    if (file_names_.empty())
+    if (names.empty())
         throw std::runtime_error("No .h5 / .hdf5 files found in " + folder_path);
-    std::sort(file_names_.begin(), file_names_.end());
+    std::sort(names.begin(), names.end());
+    file_names_ = std::move(names);
 }
 
 int SatelliteDataset::fileCount() const {
@@ -367,9 +373,15 @@ void SatelliteDataset::setJointValue(const std::string& name, double value) {
 
 void SatelliteDataset::validateJoint(const std::string& name, const JointConfig& jc,
                                      bool unknown_is_error) const {
+    for (double x : { jc.value, jc.ax, jc.ay, jc.az, jc.px, jc.py, jc.pz })
+        if (!std::isfinite(x))
+            throw std::invalid_argument("SatelliteDataset: joint of '" + name + "' is not finite");
     bool found = false;
     for (const auto& n : cached_nodes_) {
         if (n.name != name) continue;
+        if (found)
+            throw std::invalid_argument("SatelliteDataset: several components are named '" + name +
+                                        "' in " + current_file_ + ", so the name does not say which to articulate");
         found = true;
         const bool revolute = jc.type == JointConfig::Type::REVOLUTE;
         if (n.parent_index < 0 || !n.joint.movable()) {
@@ -711,18 +723,22 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         }
     }
 
-    // The root is the first group that is not one of the additive tables of
-    // the format (mass properties, SRP table, symmetry, shared meshes, origin).
+    // The root is the group that carries joint_type, like every component. A file
+    // without one takes the first group that is not one of the additive tables
+    // of the format (mass properties, SRP table, symmetry, shared meshes, origin).
     auto reserved = [](const std::string& n) {
         return n == "inertia" || n == "lumped_masses" || n == "provenance" ||
                n == "prototypes" || n == "srp" || n == "symmetry";
     };
     std::string root_name;
-    for (const auto& name : objects)
-        if (!reserved(name)) {
+    for (const auto& name : objects) {
+        if (reserved(name) || file.getObjectType(name) != HighFive::ObjectType::Group) continue;
+        if (root_name.empty()) root_name = name;
+        if (file.getGroup(name).hasAttribute("joint_type")) {
             root_name = name;
             break;
         }
+    }
     if (root_name.empty())
         throw std::runtime_error("HDF5 file has no geometry root group: " + file_path);
     auto root_group = file.getGroup(root_name);
@@ -767,8 +783,20 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         if (group.hasAttribute("T_local_offset")) {
             std::vector<double> t_flat;
             group.getAttribute("T_local_offset").read(t_flat);
-            if (t_flat.size() == 16)
-                for (int i = 0; i < 16; ++i) node.T_local_offset[i] = t_flat[i];
+            if (t_flat.size() != 16)
+                throw std::runtime_error("Component '" + gname + "' in " + file_path +
+                                         ": T_local_offset must have 16 values");
+            for (int i = 0; i < 16; ++i) node.T_local_offset[i] = t_flat[i];
+            // A rotation and a translation only: areas come from the file and normals
+            // are only turned, so a scale would give each method a different model.
+            for (int r = 0; r < 3; ++r)
+                for (int c = r; c < 3; ++c) {
+                    double d = (r == c) ? -1.0 : 0.0;
+                    for (int k = 0; k < 3; ++k) d += t_flat[r * 4 + k] * t_flat[c * 4 + k];
+                    if (!(std::fabs(d) < 1e-5))
+                        throw std::runtime_error("Component '" + gname + "' in " + file_path +
+                                                 ": T_local_offset is not a rotation and a translation");
+                }
         }
 
         if (group.hasAttribute("component_type"))
@@ -848,6 +876,9 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
             }
         } else if (group.exist("mesh")) {
             read_mesh(group.getGroup("mesh"), node);
+        } else if (!instance_key.empty()) {
+            throw std::runtime_error("Component '" + gname + "' in " + file_path + ": instance_key '" +
+                                     instance_key + "' is not in /prototypes");
         }
         if (!node.vertices_local.empty()) {
             double cx = 0.0, cy = 0.0, cz = 0.0;
@@ -879,16 +910,20 @@ void SatelliteDataset::load_h5_into_cache(const std::string& file_path)
         driver_paths.push_back(driver_path);
         const int my_idx = static_cast<int>(cached_nodes_.size()) - 1;
 
-        // component groups carry joint_type; "mesh", "ports", "deploy_states" do not
+        // Every child group but these is a component; without joint_type it is fixed.
         for (const auto& child_name : group.listObjectNames()) {
-            if (child_name == "mesh") continue;
-            auto child_group = group.getGroup(child_name);
-            if (child_group.hasAttribute("joint_type"))
-                visit(child_group, my_idx, child_name, path + "/" + child_name);
+            if (child_name == "mesh" || child_name == "ports" || child_name == "deploy_states" ||
+                group.getObjectType(child_name) != HighFive::ObjectType::Group) continue;
+            visit(group.getGroup(child_name), my_idx, child_name, path + "/" + child_name);
         }
     };
 
     visit(root_group, -1, root_name, "/" + root_name);
+
+    const bool any_triangles = std::any_of(cached_nodes_.begin(), cached_nodes_.end(),
+        [](const CachedNode& n) { return !n.tri_indices.empty(); });
+    if (!any_triangles)
+        throw std::runtime_error("No triangles in " + file_path);
 
     // Couplings: the driver is an ancestor in the generator's tree, so it is
     // cached before the driven node (computeBodyTransforms relies on that).

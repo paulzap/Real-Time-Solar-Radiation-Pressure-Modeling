@@ -4,6 +4,68 @@ All notable changes to SolaRT (the solar radiation pressure library for GPU RT
 cores, formerly "Solar Radiation Pressure Library — GPU & RT-Cores").
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] — 2026-10-31
+
+An independent second check of 1.2.1. It found no error in the computation of force and moment:
+a separate program written from scratch agrees with all six methods. The defects below concern
+input that passed silently, the API and the build. **No number changes** on valid input; see the
+check at the end of this section. Version 1.0.0 stays the code of the article.
+
+### Fixed — input that gave wrong numbers silently
+
+- **`load()` kept the old moment reference.** After `setMomentReferenceToCenterOfMass()` the
+  reference stayed at the centre of mass of the previous file, and the moment was off by 53 % in
+  the case found. It now follows the file. A file without `/inertia` makes `compute()` throw;
+  `setMomentReference()` returns to a fixed point.
+- **A component could vanish from a file.** A group with a mesh and no `joint_type` was skipped
+  (a force 80 % too small in the case found). It is now a fixed component. Every child group but
+  `mesh`, `ports` and `deploy_states` counts as a component.
+- **A file without triangles was accepted by `load()`,** and gave force 0 from all methods. It
+  is now refused, as an `instance_key` missing from `/prototypes` is. The root is now the
+  top-level group with `joint_type`, so a foreign group cannot take its place.
+- **A scale in `T_local_offset` was accepted,** and the centroid and pixel-grid methods then
+  disagreed by a factor of 2.5, since areas come from the file. It is now refused, as is an
+  attribute that does not have 16 values.
+- **Not-a-number and infinity passed the checks.** A joint value of NaN gave plausible wrong
+  numbers, differing between methods. `setJoint`, `setJointValue`, `setSunDirection`, `setGridStep`
+  and `setMomentReference` now refuse such values, and a Sun vector too large to normalise too.
+- **Components of the same name took each other's joint.** With two groups `Panel` the second
+  turned about the axis of the first. Such a file still loads and computes in its stored pose, but
+  articulating that name is refused.
+
+### Fixed — API
+
+- `SRPEngine("file.h5")` and `setFolder("file.h5")` work, as `docs/USAGE.md` promised.
+- A refused `setFolder` keeps the list of files.
+- After CUDA ran out of memory the next good call failed with the same error. It no longer does.
+- A failure of an RTX method no longer reads as "RTX bench not available".
+- The error for too many moved components gives the limit, and the limit is documented. So are
+  the ray limit of `PixelGridRTX` and what a file must hold.
+
+### Fixed — build
+
+- **CMake stopped with an error when HDF5 came from the system** (the `apt` path of the
+  documentation): FindHDF5 needs the C language. The project now enables C, and the package
+  config of `setup.sh` and `setup.ps1` does so for a consumer project declared with CXX only.
+- The package config of `setup.sh` knows the targets `hdf5::hdf5-shared` and `hdf5::hdf5-static`.
+- `setup.sh` stops with the reason if vcpkg cannot be downloaded or bootstrapped, where it
+  used to report success and go on.
+
+### Not changed
+
+The rows of the pixel grid follow a model axis (`docs/USAGE.md`, "Pixel-grid sampling"). The grid
+could be turned by a constant angle to remove this, but `PixelGridCPU` and `PixelGridGPU` would
+then sample other rays, so it does not belong in a patch release that keeps every number.
+
+### Check of the numbers
+
+Against 1.2.1, with 0 and 3 reflections, on the 100 models of the article's dataset, 120 newer
+SatForm3D models and 16 further models: `CentroidCPU` and `PixelGridCPU` are identical to the last
+bit. The GPU and RTX methods differ by at most 6e-13 of the force and 6e-12 of the moment, which
+is the rounding of their parallel sums and the size of the difference between two runs of one
+build (4e-13). The exact answers for the sphere, cube and plate are the same in all 2028 cases.
+Speed is unchanged.
+
 ## [1.2.1] — 2026-10-31
 
 This release corrects defects found by checking the library against exact answers.

@@ -39,6 +39,7 @@
             char buf[512]; \
             snprintf(buf, sizeof(buf), "CUDA error %s:%d - %s", \
                      __FILE__, __LINE__, cudaGetErrorString(err)); \
+            (void)cudaGetLastError();   /* or the next good call would read it */ \
             throw std::runtime_error(buf); \
         } \
     } while(0)
@@ -947,7 +948,8 @@ SRPResult calculate_labels_pixel_grid_gpu_bench_parts(
     if (grid_step <= 0.0)
         throw std::runtime_error("grid_step must be positive");
     if (s.instances.size() > SCENE_MAX_PARTS)
-        throw std::runtime_error("too many movable components for the GPU part table");
+        throw std::runtime_error("too many components out of their file pose for the GPU part table (limit " +
+                                 std::to_string(SCENE_MAX_PARTS - 1) + "); the CPU and RTX methods have no such limit");
     const size_t N = s.N;
 
     double slen = std::sqrt(sun_vector[0]*sun_vector[0] +

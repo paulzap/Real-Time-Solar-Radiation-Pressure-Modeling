@@ -42,8 +42,8 @@
 // Library version (see CHANGELOG.md).
 #define SOLART_VERSION_MAJOR  1
 #define SOLART_VERSION_MINOR  2
-#define SOLART_VERSION_PATCH  1
-#define SOLART_VERSION_STRING "1.2.1"
+#define SOLART_VERSION_PATCH  2
+#define SOLART_VERSION_STRING "1.2.2"
 
 // Reference to cite in published work (see CITATION.cff).
 #define SOLART_CITATION "Zapevalin, P.R. Real-Time Solar Radiation Pressure " \
@@ -233,6 +233,7 @@ public:
     explicit SatelliteDataset(const std::string& folder_path);
 
     // ---- Folder / file list ---------------------------------------------
+    // A folder of .h5 / .hdf5 files, or the path to one file.
     void        setFolder(const std::string& folder_path);
     int         fileCount()  const;
     const std::vector<std::string>& fileNames() const;
@@ -534,6 +535,7 @@ enum class SRPMethod {
 class SRPEngine {
 public:
     // Constructor: scans folder_path for .h5 files and loads the first one.
+    // A path to one file also works.
     explicit SRPEngine(const std::string& folder_path);
 
     ~SRPEngine();
@@ -620,6 +622,7 @@ public:
     double getGridStep() const;
 
     // Sun direction - normalised automatically; can be called at any time.
+    // A vector that is zero, not finite or too large to normalise is refused.
     void setSunDirection(double x, double y, double z);
     // Unit vector towards the Sun, body frame.
     std::array<double, 3> getSunDirection() const;
@@ -630,7 +633,9 @@ public:
     void                  setMomentReference(double x, double y, double z);
     std::array<double, 3> getMomentReference() const;
     // Use the centre of mass stored in the HDF5 file (pose as stored in the
-    // file). Throws if the loaded file has no mass properties.
+    // file). Throws if the loaded file has no mass properties. The reference
+    // then follows the file: after load() it is the centre of mass of the new
+    // file, and compute() throws if that file has none. setMomentReference() ends this.
     void                  setMomentReferenceToCenterOfMass();
 
     // Run the chosen method using the current dataset geometry and sun direction.

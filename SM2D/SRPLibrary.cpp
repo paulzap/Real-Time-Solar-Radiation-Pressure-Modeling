@@ -62,26 +62,27 @@ struct SRPEngine::Impl {
     int    max_reflections = 0;          // bounces for all methods
     double grid_step       = 0.05;       // pixel-grid cell size [m] (PixelGrid* only)
     std::array<double, 3> moment_ref = { 0.0, 0.0, 0.0 };   // body frame [m]
+    bool   moment_at_com = false;        // moment_ref follows the file's centre of mass
     SRPResult last_result;
 
     explicit Impl(const std::string& folder_path) : ds(folder_path) {
         if (ds.fileCount() == 0)
             throw std::runtime_error("No HDF5 files found in " + folder_path);
         ds.load(0);
-        if (ds.triangleCount() == 0)
-            throw std::runtime_error("No triangles loaded from " + ds.currentFile());
     }
 
     void setSunDirection(double x, double y, double z) {
         double len = std::sqrt(x*x + y*y + z*z);
+        if (!std::isfinite(len))
+            throw std::runtime_error("Sun direction vector must be finite");
         if (len < 1e-12)
             throw std::runtime_error("Sun direction vector is zero");
         sun_dir = { x/len, y/len, z/len };
     }
 
     void setGridStep(double step) {
-        if (!(step > 0.0))
-            throw std::runtime_error("Grid step must be > 0");
+        if (!(step > 0.0) || !std::isfinite(step))
+            throw std::runtime_error("Grid step must be finite and > 0");
         grid_step = step;
     }
 
@@ -100,6 +101,11 @@ struct SRPEngine::Impl {
         g_gpu_geometry_version = g;
     }
 
+    // load() may have brought another file, and with it another centre of mass.
+    void update_moment_reference() {
+        if (moment_at_com) moment_ref = ds.centerOfMass();   // throws if the file has no /inertia group
+    }
+
     // Moment about the chosen reference point: M_ref = M_origin - r_ref x F.
     // With the default reference (origin) the result is left untouched.
     void apply_moment_reference(SRPResult& r) const {
@@ -114,6 +120,7 @@ struct SRPEngine::Impl {
     // Fast path: GPU/RTX branches use the lean "bench" kernels (no bounce tracking).
     // CPU branches always populate bounce globals internally (cheap on CPU).
     SRPResult compute(SRPMethod method) {
+        update_moment_reference();
         sync_gpu_geometry(method);
         std::vector<double> sun_vec = { sun_dir[0], sun_dir[1], sun_dir[2] };
         // A file with movable components goes through the two-level GPU path,
@@ -175,6 +182,7 @@ struct SRPEngine::Impl {
     // Visualization path: full bounce tracking (non-bench kernels).
     // After return, getBounceLevels() / getIncidentDirs() / getOriginPts() are valid.
     SRPResult computeViz(SRPMethod method) {
+        update_moment_reference();
         sync_gpu_geometry(method);
         std::vector<double> sun_vec = { sun_dir[0], sun_dir[1], sun_dir[2] };
         const bool parts = method_uses_gpu(method) && !ds.instanceScene().single();
@@ -481,11 +489,17 @@ void SRPEngine::setSunDirection(double x, double y, double z) {
 std::array<double, 3> SRPEngine::getSunDirection() const { return pImpl->sun_dir; }
 
 void SRPEngine::setMomentReference(double x, double y, double z) {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+        throw std::runtime_error("Moment reference point must be finite");
     pImpl->moment_ref = { x, y, z };
+    pImpl->moment_at_com = false;
 }
-std::array<double, 3> SRPEngine::getMomentReference() const { return pImpl->moment_ref; }
+std::array<double, 3> SRPEngine::getMomentReference() const {
+    return pImpl->moment_at_com ? pImpl->ds.centerOfMass() : pImpl->moment_ref;
+}
 void SRPEngine::setMomentReferenceToCenterOfMass() {
     pImpl->moment_ref = pImpl->ds.centerOfMass();   // throws if the file has no /inertia group
+    pImpl->moment_at_com = true;
 }
 
 SRPResult SRPEngine::compute(SRPMethod method)    { return pImpl->compute(method); }

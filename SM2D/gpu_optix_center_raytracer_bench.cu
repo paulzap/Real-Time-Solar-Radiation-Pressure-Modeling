@@ -389,7 +389,7 @@ static SRPResult calculate_labels_ray_casting_rtx_bench_impl(
     }
     catch (const std::exception& e) {
         throw std::runtime_error(
-            std::string("RTX bench not available (ray_casting_rtx_bench): ") + e.what());
+            std::string("RTX method failed (ray_casting_rtx_bench): ") + e.what());
     }
 }
 

@@ -38,9 +38,11 @@
 
 #define REFL_CUDA_CHECK(ans) { reflGpuAssert((ans), __FILE__, __LINE__); }
 inline void reflGpuAssert(cudaError_t code, const char* file, int line, bool abort = true) {
-    if (code != cudaSuccess && abort)
+    if (code != cudaSuccess && abort) {
+        (void)cudaGetLastError();   // or the next good call would read it
         throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(code) + " at " +
                                  file + ":" + std::to_string(line));
+    }
 }
 
 // ---------------------- GPU structures (float) ----------------------
@@ -1257,7 +1259,8 @@ SRPResult calculate_labels_ray_casting_reflections_gpu_parts(
     const InstanceScene& s = ds.instanceScene();
     if (s.N == 0) return {};
     if (s.instances.size() > SCENE_MAX_PARTS)
-        throw std::runtime_error("too many movable components for the GPU part table");
+        throw std::runtime_error("too many components out of their file pose for the GPU part table (limit " +
+                                 std::to_string(SCENE_MAX_PARTS - 1) + "); the CPU and RTX methods have no such limit");
     // Body-frame triangles: the direct force is summed on the host, as above.
     const std::vector<Triangle>& triangles = ds.triangles();
 

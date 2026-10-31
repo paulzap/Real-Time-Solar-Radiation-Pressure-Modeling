@@ -42,9 +42,11 @@
 
 #define REFL_BENCH_CUDA_CHECK(ans) { reflBenchGpuAssert((ans), __FILE__, __LINE__); }
 inline void reflBenchGpuAssert(cudaError_t code, const char* file, int line, bool abort_=true) {
-    if (code != cudaSuccess && abort_)
+    if (code != cudaSuccess && abort_) {
+        (void)cudaGetLastError();   // or the next good call would read it
         throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(code) + " at " +
                                  file + ":" + std::to_string(line));
+    }
 }
 
 // ---------------------- GPU structures (float, same as original) ----------------------
@@ -916,7 +918,8 @@ SRPResult calculate_labels_reflections_gpu_bench_parts(
     const InstanceScene& s = ds.instanceScene();
     if (s.N == 0) return {};
     if (s.instances.size() > SCENE_MAX_PARTS)
-        throw std::runtime_error("too many movable components for the GPU part table");
+        throw std::runtime_error("too many components out of their file pose for the GPU part table (limit " +
+                                 std::to_string(SCENE_MAX_PARTS - 1) + "); the CPU and RTX methods have no such limit");
 
     double len = sqrt(sun_vector[0]*sun_vector[0] + sun_vector[1]*sun_vector[1] + sun_vector[2]*sun_vector[2]);
     if (len < 1e-12) throw std::runtime_error("Sun vector is zero");

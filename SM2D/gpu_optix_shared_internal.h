@@ -41,6 +41,7 @@ std::vector<std::string> ptx_search_paths(const char* file_name);
 #define CUDA_CHECK(call) { \
     cudaError_t _err = (call); \
     if (_err != cudaSuccess) { \
+        (void)cudaGetLastError();   /* or the next good call would read it */ \
         throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(_err) \
             + " at " __FILE__ ":" + std::to_string(__LINE__)); \
     } \

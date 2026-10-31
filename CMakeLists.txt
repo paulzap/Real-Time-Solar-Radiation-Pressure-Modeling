@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.23)
 # SolaRT - solar radiation pressure on GPU RT cores. The CMake project and
 # package keep the name SRPLibrary (find_package(SRPLibrary) in user builds).
-project(SRPLibrary VERSION 1.2.1
+project(SRPLibrary VERSION 1.2.2
         DESCRIPTION "SolaRT - solar radiation pressure on GPU RT cores"
-        LANGUAGES CXX)
+        LANGUAGES C CXX)   # C: FindHDF5 compiles a C test program
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

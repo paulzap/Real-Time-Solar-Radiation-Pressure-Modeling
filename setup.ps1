@@ -707,6 +707,8 @@ foreach(_srp_hdf5_cand hdf5::hdf5 hdf5::hdf5-shared hdf5::hdf5-static HDF5::HDF5
     endif()
 endforeach()
 if(NOT _SRP_HDF5_TARGET)
+    # FindHDF5 compiles a C test program
+    enable_language(C)
     find_package(HDF5 REQUIRED COMPONENTS C)
     set(_SRP_HDF5_TARGET "HDF5::HDF5")
     find_package(ZLIB QUIET)

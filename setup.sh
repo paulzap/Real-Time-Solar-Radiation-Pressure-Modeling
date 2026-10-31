@@ -148,8 +148,14 @@ if [[ -z "$VCPKG_ROOT" || ! -x "$VCPKG_ROOT/vcpkg" ]]; then
   warn "vcpkg not found."
   read -rp "  Install vcpkg to $HOME/vcpkg now? [Y/n] " ans
   if [[ ! "$ans" =~ ^[Nn] ]]; then
-    git clone https://github.com/microsoft/vcpkg "$HOME/vcpkg" --depth 1
-    "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+    if ! git clone https://github.com/microsoft/vcpkg "$HOME/vcpkg" --depth 1; then
+      err "Could not download vcpkg into $HOME/vcpkg. Check the network, then run setup.sh again."
+      exit 1
+    fi
+    if ! "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics; then
+      err "vcpkg bootstrap failed in $HOME/vcpkg."
+      exit 1
+    fi
     VCPKG_ROOT="$HOME/vcpkg"
     ok "vcpkg installed at $VCPKG_ROOT"
   else
@@ -475,13 +481,18 @@ endforeach()
 # ── HDF5 (always required) ────────────────────────────────────────────────────
 # Try CONFIG mode first: vcpkg's hdf5-config.cmake pulls in zlib + szip/libaec
 # automatically, which are needed when linking against the static libhdf5.a.
+# vcpkg (>= 1.14) exports hdf5::hdf5-shared / hdf5::hdf5-static, not a plain hdf5::hdf5.
 find_package(HDF5 CONFIG QUIET)
-if(HDF5_FOUND AND TARGET hdf5::hdf5)
-    set(_SRP_HDF5_TARGET "hdf5::hdf5")           # vcpkg target name
-elseif(HDF5_FOUND AND TARGET HDF5::HDF5)
-    set(_SRP_HDF5_TARGET "HDF5::HDF5")            # modern cmake config target
-else()
-    # Fall back to module mode (system HDF5 packages)
+set(_SRP_HDF5_TARGET "")
+foreach(_srp_hdf5_cand hdf5::hdf5 hdf5::hdf5-shared hdf5::hdf5-static HDF5::HDF5)
+    if(TARGET \${_srp_hdf5_cand})
+        set(_SRP_HDF5_TARGET "\${_srp_hdf5_cand}")
+        break()
+    endif()
+endforeach()
+if(NOT _SRP_HDF5_TARGET)
+    # Fall back to module mode (system HDF5 packages); FindHDF5 compiles a C test program
+    enable_language(C)
     find_package(HDF5 REQUIRED COMPONENTS C)
     set(_SRP_HDF5_TARGET "HDF5::HDF5")
     # Static libhdf5.a needs zlib and szip/libaec linked explicitly
